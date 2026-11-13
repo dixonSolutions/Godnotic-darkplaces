@@ -1,0 +1,37 @@
+name: Godnotic integration
+
+# This repository is the source of Godnotic's darkplaces component. Every commit is
+# built and tested inside dixonSolutions/Godnotic, the repository that packages
+# and releases the game; a push to main is then picked up there (at once with a
+# GODNOTIC_SYNC_TOKEN secret, otherwise within half an hour) and released.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integrate:
+    uses: dixonSolutions/Godnotic/.github/workflows/component-check.yml@main
+    with:
+      component: darkplaces
+      revision: ${{ github.event.pull_request.head.sha || github.sha }}
+
+  notify:
+    name: Tell Godnotic main
+    needs: integrate
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Start the component sync
+        env:
+          GH_TOKEN: ${{ secrets.GODNOTIC_SYNC_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "No GODNOTIC_SYNC_TOKEN: Godnotic main polls this repository every 30 minutes."
+            exit 0
+          fi
+          gh api repos/dixonSolutions/Godnotic/dispatches -f event_type=component-updated
