@@ -27,6 +27,7 @@ touch_joinfail_logic.h.
 #include "touch_joinfail_logic.h"
 #include "touch_nativefe.h"
 #include "touch_datafetch.h"
+#include "touch_joinname.h"
 
 static cvar_t join_fail_serial = {CF_CLIENT | CF_READONLY, "_join_fail_serial", "0", "Godnotic: counts the joins that failed this session; the other _join_fail_* cvars describe the last one"};
 static cvar_t join_fail_kind = {CF_CLIENT | CF_READONLY, "_join_fail_kind", "", "Godnotic: why the last join failed: timeout, busy, refused, network, dropped, files, error"};
@@ -34,7 +35,7 @@ static cvar_t join_fail_text = {CF_CLIENT | CF_READONLY, "_join_fail_text", "", 
 static cvar_t join_fail_detail = {CF_CLIENT | CF_READONLY, "_join_fail_detail", "", "Godnotic: the server's own words for the last failed join, or what to do about it"};
 static cvar_t join_fail_address = {CF_CLIENT | CF_READONLY, "_join_fail_address", "", "Godnotic: the address of the last failed join (join_retry connects to it again)"};
 static cvar_t touch_joinfail_dialog = {CF_CLIENT, "touch_joinfail_dialog", "1", "Godnotic: open the menu's Could not join dialog when a join fails (a native front end that shows its own sets 0)"};
-static cvar_t net_connect_backoff = {CF_CLIENT | CF_ARCHIVE, "net_connect_backoff", "1", "Godnotic: when a server answers the challenge but ignores the connect three times, wait out its 5 second connect flood block once instead of renewing it every second"};
+static cvar_t net_connect_backoff = {CF_CLIENT | CF_ARCHIVE, "net_connect_backoff", "1", "Godnotic: when a server answers the challenge but ignores the connect four times, wait out its 5 second connect flood block once instead of renewing it every second"};
 
 static struct
 {
@@ -44,13 +45,14 @@ static struct
 	qbool backed_off;
 	qbool in_reply;     // cl_connect_status is the "replying to challenge" line
 	int challenges;
+	double reply_time;  // when the last connect went out
 	qbool ipv6;
 	char address[128];
 	char last_status[MAX_QPATH];
 	// a drop is reported a moment later, unless a reconnect took over
 	double pending_time;
 	int pending_kind;
-	char pending_text[200], pending_detail[256];
+	char pending_text[256], pending_detail[256];
 } jf;
 
 qbool TouchJoinFail_Joining(void)
@@ -82,8 +84,9 @@ static void report(int kind, const char *text, const char *detail)
 
 static void finish(const char *status)
 {
-	char text[200], detail[256];
-	int kind = TouchJoinFail_Classify(status, jf.challenges, jf.connected, jf.ipv6, jf.address, text, sizeof(text), detail, sizeof(detail));
+	char text[256], detail[256], label[200];
+	// the sentences name the server as the join screens do: "name (address)" (touch_joinname.c)
+	int kind = TouchJoinFail_Classify(status, jf.challenges, jf.connected, jf.ipv6, TouchJoinName_Label(jf.address, label, sizeof(label)), text, sizeof(text), detail, sizeof(detail));
 	jf.active = false;
 	if (!kind)
 		return;
@@ -108,6 +111,7 @@ void TouchJoinFail_Frame(void)
 	qbool trying;
 	if (cls.state == ca_dedicated)
 		return;
+	TouchJoinName_Frame(); // the joined server's name, for the sentences below too
 	trying = cls.connect_trying;
 
 	if (jf.pending_kind && host.realtime >= jf.pending_time)
@@ -151,18 +155,22 @@ void TouchJoinFail_Frame(void)
 		// The challenge handler leaves this line; the next request replaces it.
 		qbool reply = !strcmp(cl_connect_status, "Connect: replying to challenge...");
 		if (reply && !jf.in_reply)
+		{
 			jf.challenges++;
+			jf.reply_time = host.realtime;
+		}
 		jf.in_reply = reply;
 		if (net_connect_backoff.integer && cls.connect_nextsendtime < host.realtime + 0.05
 			&& TouchJoin_ShouldBackOff(jf.challenges, jf.backed_off))
 		{
 			jf.backed_off = true;
-			cls.connect_nextsendtime = host.realtime + TOUCHJOIN_BACKOFF_SECONDS;
+			// the block runs from the last ignored connect, not from now
+			cls.connect_nextsendtime = max(jf.reply_time + TOUCHJOIN_BACKOFF_SECONDS, host.realtime + 1);
 			if (cls.connect_remainingtries < TOUCHJOIN_BACKOFF_TRIES)
 				cls.connect_remainingtries = TOUCHJOIN_BACKOFF_TRIES;
 			dp_strlcpy(cl_connect_status, "Connect: the server is busy, asking again in a few seconds...", sizeof(cl_connect_status));
 			jf.in_reply = false;
-			Con_Printf("Join: %s answers but ignores the connect; waiting %.1f s for its connect flood block to end\n", jf.address, TOUCHJOIN_BACKOFF_SECONDS);
+			Con_Printf("Join: %s answers but ignores the connect; waiting %.1f s for its connect flood block to end\n", jf.address, cls.connect_nextsendtime - host.realtime);
 		}
 		return;
 	}
@@ -197,5 +205,6 @@ void TouchJoinFail_Init(void)
 	Cvar_RegisterVariable(&join_fail_address);
 	Cvar_RegisterVariable(&touch_joinfail_dialog);
 	Cvar_RegisterVariable(&net_connect_backoff);
+	TouchJoinName_Init();
 	Cmd_AddCommand(CF_CLIENT, "join_retry", TouchJoinFail_Retry_f, "Godnotic: join the server of the last failed join again (_join_fail_address)");
 }

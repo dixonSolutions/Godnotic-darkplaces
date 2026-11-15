@@ -30,6 +30,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "touch_lan.h" // Touch: LAN games
 #include "touch_net.h" // Touch: windowed reliable channel, fast signon
 #include "touch_srvlist.h" // Touch: the fast server list
+#include "touch_joinname.h" // Touch: the joined server's name
 #include <time.h>
 
 #define QWMASTER_PORT 27000
@@ -2113,6 +2114,7 @@ static int NetConn_ClientParsePacket(lhnetsocket_t *mysocket, unsigned char *dat
 		string = stringbuf;
 		length = TouchNet_ClientConnectionless(string, length); // Touch: "accept\\rwin\\N" is an accept with a window
 		TouchLAN_ClientConnectionless(string, length, peeraddress); // Touch: the host ended its LAN game
+		if (TouchJoinName_Connectionless(string, length, peeraddress)) return true; // Touch: the joined server's name (touch_joinname.c)
 
 		if (developer_networking.integer)
 		{
@@ -3478,6 +3480,7 @@ static int NetConn_ServerParsePacket(lhnetsocket_t *mysocket, unsigned char *dat
 						// keep their stuff intact
 						if (developer_extra.integer)
 							Con_Printf("Datagram_ParseConnectionless: sending \"accept\" to %s.\n", addressstring2);
+						if (!TouchNet_ServerRejoin(client->netconnection, mysocket, peeraddress, string)) // Touch: the connection starts over, as the client's does
 						NetConn_WriteString(mysocket, "\377\377\377\377accept", peeraddress);
 						if(crypto && crypto->authenticated)
 							Crypto_FinishInstance(&client->netconnection->crypto, crypto);
@@ -3491,7 +3494,7 @@ static int NetConn_ServerParsePacket(lhnetsocket_t *mysocket, unsigned char *dat
 							Con_Printf("Datagram_ParseConnectionless: sending duplicate accept to %s.\n", addressstring2);
 						if(crypto && crypto->authenticated)
 							Crypto_FinishInstance(&client->netconnection->crypto, crypto);
-						if (!TouchNet_ServerAccept(client->netconnection, mysocket, peeraddress, string)) // Touch: the same window again
+						if (!TouchNet_ServerDuplicate(client, mysocket, peeraddress, string)) // Touch: the same window again, or a fresh connection for a client that started over
 						NetConn_WriteString(mysocket, "\377\377\377\377accept", peeraddress);
 					}
 					return true;
