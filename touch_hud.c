@@ -1498,6 +1498,7 @@ static qbool hoplock_hit(float px, float py)
 static qbool spec_hud(void);
 static int assign_spec_role(float px, float py);
 static void spec_frame(qbool *fire, qbool *fire2, qbool *jump);
+static qbool spec_bar_shown(void);
 static qbool hud_has(int ctl);
 static int hud_mode(void);
 static qbool tospec_shown(void);
@@ -1507,6 +1508,11 @@ static void extra_release(finger_t *f);
 #define ROLE_TOSPEC  306
 #define ROLE_READY   307
 #define ROLE_RESPAWN 308
+#define ROLE_SPEC_ATTACK 300   // FOLLOW / NEXT: +attack while held
+#define ROLE_SPEC_PREV   301   // weapprev on the press
+#define ROLE_SPEC_FREE   302   // +attack2 while held
+#define ROLE_SPEC_UP     303   // +moveup while held
+#define ROLE_SPEC_DOWN   304   // +movedown while held
 
 static int assign_role(float px, float py)
 {
@@ -1585,8 +1591,8 @@ static void look_cfg(touchlook_cfg_t *c)
 	c->sens = cv("touch_sens_base", 3.6f);
 	c->y_mult = cv("touch_sens_y_mult", 0.85f);
 	c->accel = cv("touch_look_accel", 0.8f);
-	c->accel_lo = cv("touch_look_accel_lo", 150);
-	c->accel_hi = cv("touch_look_accel_hi", 900);
+	c->accel_lo = cv("touch_look_accel_lo", 200);
+	c->accel_hi = cv("touch_look_accel_hi", 800);
 	c->filter = (int)cv("touch_look_filter", 1);
 	c->fcmin = cv("touch_look_fcmin", 4.0f);
 	c->beta = cv("touch_look_beta", 0.05f);
@@ -1710,7 +1716,7 @@ static void button_drag_look(finger_t *f, qbool aim_button, qbool *look_seen, fl
 		return;
 	ddx = f->last_x - f->down_x;
 	ddy = f->last_y - f->down_y;
-	if (!f->draglook && sqrt(ddx * ddx + ddy * ddy) >= cv("touch_look_deadzone_px", 4))
+	if (!f->draglook && sqrt(ddx * ddx + ddy * ddy) >= cv("touch_look_deadzone_px", 8))
 	{
 		f->draglook = true;
 		look_begin();
@@ -2325,12 +2331,15 @@ void TouchHUD_Frame(void)
 		finger_t *f = &fingers[j];
 		if (!f->used)
 			continue;
+		// a bar that was turned off under a held finger stops acting at once
+		if (!spec_bar_shown() && (f->role == ROLE_SPEC_ATTACK || f->role == ROLE_SPEC_PREV || f->role == ROLE_SPEC_FREE))
+			continue;
 		switch (f->role)
 		{
 		case ROLE_MOVE:
 			TouchStick_Read(&stick, f->last_x, f->last_y, stick_radius() * max(0.1f, cv("touch_stick_range", 1.0f)),
 				false,
-				cv("touch_stick_deadzone", 0.12f), cv("touch_stick_run", 0.6f), &stick_axis_x, &stick_axis_y, &move_off_x, &move_off_y);
+				cv("touch_stick_deadzone", 0.14f), cv("touch_stick_run", 0.6f), &stick_axis_x, &stick_axis_y, &move_off_x, &move_off_y);
 			move_active = true;
 			break;
 		case ROLE_LOOK:
@@ -2656,7 +2665,7 @@ static void draw_move_stick(float a)
 		cy = stick.cy;
 	}
 	mag = sqrt(move_off_x * move_off_x + move_off_y * move_off_y);
-	active = stick_held && mag > cv("touch_stick_deadzone", 0.12f);
+	active = stick_held && mag > cv("touch_stick_deadzone", 0.14f);
 	knob_r = r * 0.34f;
 	knob_x = cx + move_off_x * (r - knob_r);
 	knob_y = cy + move_off_y * (r - knob_r);
@@ -2712,12 +2721,8 @@ static void draw_strip_only(void)
 // match (scoreboard, next-map vote) only MENU stays, in the top-left corner;
 // the console button keeps the other.
 // ---------------------------------------------------------------------------
-#define ROLE_SPEC_ATTACK 300   // FOLLOW / NEXT: +attack while held
-#define ROLE_SPEC_PREV   301   // weapprev on the press
-#define ROLE_SPEC_FREE   302   // +attack2 while held
-#define ROLE_SPEC_UP     303   // +moveup while held
-#define ROLE_SPEC_DOWN   304   // +movedown while held
-// ROLE_TOSPEC 306 ("move to spectators", on release), ROLE_READY 307
+// The spectator roles are defined above assign_role (300..304), next to the
+// other roles; ROLE_TOSPEC 306 ("move to spectators", on release), ROLE_READY 307
 // ("ready", on release) and ROLE_RESPAWN 308 (+jump while held, dead) are
 // defined above assign_role.
 
@@ -2735,6 +2740,14 @@ static qbool reduce_motion(void) { return cv("touch_reduce_motion", 0) != 0; }
 static qbool spec_hud(void)
 {
 	return TouchHUD_Active() && TouchUI_SpectatorState() != TOUCHSPEC_NONE;
+}
+
+// Off by default on a touch screen (touch_specbar_visible): following is a
+// setting, not a control in the way while the player watches. The desk strip
+// has its own switch (touch_desk_specbar).
+static qbool spec_bar_shown(void)
+{
+	return TouchSpec_BarShown(TouchUI_SpectatorState(), (int)cv("touch_specbar_visible", TOUCHSPEC_BAR_DEFAULT)) != 0;
 }
 
 static void spec_release(void)
@@ -2797,13 +2810,14 @@ static int assign_spec_role(float px, float py)
 		return role;
 	if (in_edge_deadzone(px, py))
 		return ROLE_IGNORED;
-	for (part = 0; part < TOUCHSPEC_BAR_PARTS; part++)
-	{
-		int action = TouchSpec_BarAction(state, part);
-		spec_bar_part(part, &cx, &cy, &hx, &hy);
-		if (fabs(px - cx) <= hx + hy * 0.12f && fabs(py - cy) <= hy * 1.15f)
-			return action != TOUCHSPEC_ACT_NONE ? spec_action_role(action) : ROLE_IGNORED;
-	}
+	if (spec_bar_shown())
+		for (part = 0; part < TOUCHSPEC_BAR_PARTS; part++)
+		{
+			int action = TouchSpec_BarAction(state, part);
+			spec_bar_part(part, &cx, &cy, &hx, &hy);
+			if (fabs(px - cx) <= hx + hy * 0.12f && fabs(py - cy) <= hy * 1.15f)
+				return action != TOUCHSPEC_ACT_NONE ? spec_action_role(action) : ROLE_IGNORED;
+		}
 	if (TouchSpec_StickShown(state))
 	{
 		int up;
@@ -2910,7 +2924,8 @@ static void draw_spec_hud(float a)
 		spec_fly_part(false, &cx, &cy, &r);
 		widget_button(cx, cy, r, "DOWN", key_movedown, a * 0.9f, C_ACCENT);
 	}
-	draw_spec_bar(state, a);
+	if (spec_bar_shown())
+		draw_spec_bar(state, a);
 	// following someone: their health, armour and ammo, read only
 	if ((state == TOUCHSPEC_FOLLOWING || state == TOUCHSPEC_OUT) && cl.stats[STAT_HEALTH] > 0)
 		draw_vitals(a);
@@ -3382,7 +3397,7 @@ void TouchHUD_PrintRects(void)
 	rect_panel("infomessages");
 	if (state != TOUCHSPEC_NONE)
 	{
-		for (part = 0; part < TOUCHSPEC_BAR_PARTS; part++)
+		for (part = 0; spec_bar_shown() && part < TOUCHSPEC_BAR_PARTS; part++)
 		{
 			char name[16];
 			if (!TouchSpec_BarLabel(state, part)[0])

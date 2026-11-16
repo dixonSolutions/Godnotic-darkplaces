@@ -1486,6 +1486,29 @@ static qbool TouchWep_ShouldSwitchSmart(float held_u, qbool held_can_shoot, floa
 }
 
 // ---------------------------------------------------------------------------
+// Safety gates for the aim helpers
+// ---------------------------------------------------------------------------
+
+// The pull may close the gap to a target, but never against the way the
+// finger is turning: a rightward drag is not pulled left. Per axis; a finger
+// that is not turning leaves the pull free (a thumb at rest still tracks).
+static void TouchWep_PullWithFinger(float finger_yaw, float finger_pitch, float *pull_yaw, float *pull_pitch)
+{
+	if (finger_yaw * *pull_yaw < 0)
+		*pull_yaw = 0;
+	if (finger_pitch * *pull_pitch < 0)
+		*pull_pitch = 0;
+}
+
+// Auto-shoot keeps firing for `release` seconds after the crosshair leaves
+// the target, so a jittery track does not stutter. With no enemy in view at
+// all there is nothing to aim at: no tail, the trigger is up at once.
+static qbool TouchWep_AutoShootTail(qbool autoshoot, qbool target_in_view, double since_last_on, float release)
+{
+	return autoshoot && target_in_view && since_last_on < release;
+}
+
+// ---------------------------------------------------------------------------
 // Offline practice: what only a match against bots on the player's own
 // machine may use
 // ---------------------------------------------------------------------------

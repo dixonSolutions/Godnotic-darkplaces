@@ -3423,7 +3423,10 @@ static void aim_frame(void)
 		else
 		{
 			ta.on_since = 0;
-			if (!autoshoot || now - ta.last_on >= bound(0.0f, cl_touch_autoshoot_release.value, 0.5f))
+			// no enemy in view means nothing to aim at: stop at once, not
+			// after the jitter tail
+			if (!TouchWep_AutoShootTail(autoshoot, near.entnum != 0, now - ta.last_on,
+				bound(0.0f, cl_touch_autoshoot_release.value, 0.5f)))
 			{
 				on = on2 = false;
 				target = 0;
@@ -3630,6 +3633,9 @@ static void aim_frame(void)
 				py *= cap / len;
 				pp *= cap / len;
 			}
+			// never against the finger's own turn: closing the gap is help,
+			// pulling the view back is not
+			TouchWep_PullWithFinger(turn_yaw, turn_pitch, &py, &pp);
 			cl.viewangles[YAW] += py;
 			cl.viewangles[PITCH] = bound(-89.0f, cl.viewangles[PITCH] + pp, 89.0f);
 		}

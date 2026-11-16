@@ -137,6 +137,17 @@ static inline int TouchSpec_StickShown(int state)
 	return TouchSpec_Flying(state);
 }
 
+// The bar (previous | follow or free | next) is off by default on a touch
+// screen: following is a choice the player turns on in Touch controls, not a
+// control in the way while they watch. Following stays reachable from MENU
+// (the join / spectate rows), and the setting is touch_specbar_visible.
+#define TOUCHSPEC_BAR_DEFAULT 0
+
+static inline int TouchSpec_BarShown(int state, int visible)
+{
+	return state != TOUCHSPEC_NONE && visible != 0;
+}
+
 // ---------------------------------------------------------------------------
 // After a join from the join dialog ("cmd join"): a join the server does not
 // take (joining locked, teams full, spectate-only) leaves the player
