@@ -40,6 +40,7 @@ Everything works on the desktop too, without a sink, for headless tests
 #include "cl_screen.h"
 #include "libcurl.h"
 #include "touch_frontend.h"
+#include "touch_music.h"
 #include "touch_hud.h"
 #include "touch_lan.h"
 #include "touch_lua.h"
@@ -1552,4 +1553,34 @@ void TouchFE_Init(void)
 	Cmd_AddCommand(CF_CLIENT, "fe", TouchFE_Cmd_f, "native front-end bridge intent: fe <verb> <percent-encoded args> (docs/FRONTEND_BRIDGE.md)");
 	Cmd_AddCommand(CF_CLIENT, "fe_dump", TouchFE_Dump_f, "print a front-end bridge topic as JSON: fe_dump app|connect|cvars|servers|lan|maps|gametypes|mods|player|preview");
 	Cmd_AddCommand(CF_CLIENT, "fe_take", TouchFE_Take_f, "print the front-end bridge topics that changed since the last fe_take, and the pending events");
+}
+
+/* Run even when a native frontend hides the QuakeC menu. */
+void TouchMusic_Update(void)
+{
+    static qbool playing;
+    static double next_check;
+    qbool in_game = cls.connect_trying || cls.state == ca_connected;
+    qbool present = false;
+    int action;
+    if (!in_game && !playing && host.realtime >= next_check)
+    {
+        next_check = host.realtime + 0.5;
+        present = FS_FileExists("touch/music-ready.txt") ||
+            FS_FileExists("sound/cdtracks/rising-of-the-phoenix.ogg") ||
+            FS_FileExists("sound/cdtracks/rising-of-the-phoenix.opus");
+    }
+    action = TouchMusic_Policy(in_game, present, playing);
+    if (action > 0)
+    {
+        playing = true;
+        Cbuf_AddText(cmd_local, "\nmusic_playlist_index -1; menu_cdtrack rising-of-the-phoenix; fs_rescan; cd loop rising-of-the-phoenix\n");
+        Con_Printf("MUSIC: start menu theme\n");
+    }
+    else if (action < 0)
+    {
+        playing = false;
+        Cbuf_AddText(cmd_local, "\ncd stop\n");
+        Con_Printf("MUSIC: stop menu theme for match\n");
+    }
 }

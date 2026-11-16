@@ -525,6 +525,7 @@ void CDAudio_Update (void)
 	if (!enabled)
 		return;
 
+	{ extern void TouchMusic_Update(void); TouchMusic_Update(); } // Touch: menu music lifecycle
 	CDAudio_SetVolume (bgmvolume.value);
 	if (music_playlist_playing > 0 && CDAudio_GetPosition() < 0)
 	{
