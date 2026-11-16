@@ -721,6 +721,41 @@ static void panel_place(const char *panel, float x, float y, float w, float h)
 	panel_cvar(name, value);
 }
 
+// A saved, hand-placed top bar can hold positions from an older default and put
+// two pills on top of each other. Asked once per frame while the automatic row
+// is off: if they overlap, the row takes over and says so.
+static qbool topbar_user_overlaps(void)
+{
+	static const char *pill[3] = { "touch_pause", "touch_scores", "touch_chat" };
+	touchbar_rect_t r[3];
+	char name[48];
+	int i, j, n = 0;
+	for (i = 0; i < 3; i++)
+	{
+		float hx, hy, size, aspect;
+		dpsnprintf(name, sizeof(name), "%s_visible", pill[i]);
+		if (cv(name, 1) == 0)
+			continue;
+		dpsnprintf(name, sizeof(name), "%s_size", pill[i]);
+		size = cv(name, 0.060f);
+		dpsnprintf(name, sizeof(name), "%s_aspect", pill[i]);
+		aspect = cv(name, 2.4f);
+		widget_half(size, aspect, &hx, &hy);
+		dpsnprintf(name, sizeof(name), "%s_x", pill[i]);
+		r[n].x = cv(name, 0.5f) * ui_w() - hx;
+		dpsnprintf(name, sizeof(name), "%s_y", pill[i]);
+		r[n].y = cv(name, 0.5f) * ui_h() - hy;
+		r[n].w = hx * 2;
+		r[n].h = hy * 2;
+		n++;
+	}
+	for (i = 0; i < n; i++)
+		for (j = i + 1; j < n; j++)
+			if (TouchTopBar_Intersect(&r[i], &r[j]))
+				return true;
+	return false;
+}
+
 static void topbar_sync(void)
 {
 	touchbar_in_t in;
@@ -731,6 +766,12 @@ static void topbar_sync(void)
 	topbar_valid = false;
 	if ((TouchLua_VibrateHook != NULL) != (touch_haptics_available.integer != 0))
 		Cvar_SetValueQuick(&touch_haptics_available, TouchLua_VibrateHook != NULL);
+	if (!touch_topbar_auto.integer && vid_touchscreen.integer && cls.state == ca_connected && W >= 16 && H >= 16
+		&& topbar_user_overlaps())
+	{
+		Con_Printf("Touch HUD: the saved top bar had overlapping buttons, using the automatic row\n");
+		Cvar_SetValueQuick(&touch_topbar_auto, 1);
+	}
 	if (!touch_topbar_auto.integer || !vid_touchscreen.integer || cls.state != ca_connected || W < 16 || H < 16)
 		return;
 	if (insets && insets[0])
