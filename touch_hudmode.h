@@ -235,26 +235,50 @@ static inline int TouchMode_Controls(int mode, int flags)
 #define TOUCHACT_RESUME   0
 #define TOUCHACT_JOIN     1
 #define TOUCHACT_SPECTATE 2   // "Move to spectators"
-#define TOUCHACT_TEAM     3   // "Change team"
-#define TOUCHACT_SETTINGS 4
-#define TOUCHACT_LEAVE    5
-#define TOUCHACT_COUNT    6
+#define TOUCHACT_FOLLOW   3   // start following while free-flying
+#define TOUCHACT_NEXT     4   // next player while following
+#define TOUCHACT_PREV     5   // previous player while following
+#define TOUCHACT_FREE     6   // back to free-fly while following
+#define TOUCHACT_TEAM     7   // "Change team"
+#define TOUCHACT_SETTINGS 8
+#define TOUCHACT_LEAVE    9
+#define TOUCHACT_COUNT    10
 
 #define TOUCHACT_HIDDEN   0
 #define TOUCHACT_ENABLED  1
 #define TOUCHACT_DISABLED 2   // shown, not now (a join being answered, in the queue)
 #define TOUCHACT_CONFIRM  3   // enabled, asks first: it would forfeit something
 
+// What the spectator actions send: the bar's own presses, held for a couple of
+// frames so a join or a server frame cannot fall between them (the same
+// commands the desk strip's clicks run).
+#define TOUCHACT_ATTACK_CMD "+attack 50003; wait; wait; -attack 50003"
+#define TOUCHACT_FREE_CMD   "+attack2 50003; wait; wait; -attack2 50003"
+#define TOUCHACT_PREV_CMD   "weapprev"
+
 static inline const char *TouchAct_Id(int act)
 {
-	static const char *ids[TOUCHACT_COUNT] = { "resume", "join", "spectate", "team", "settings", "leave" };
+	static const char *ids[TOUCHACT_COUNT] = { "resume", "join", "spectate", "follow", "next", "prev", "free", "team", "settings", "leave" };
 	return act >= 0 && act < TOUCHACT_COUNT ? ids[act] : "";
 }
 
 static inline const char *TouchAct_Label(int act)
 {
-	static const char *labels[TOUCHACT_COUNT] = { "Resume", "Join game", "Spectate", "Change team", "Settings", "Leave" };
+	static const char *labels[TOUCHACT_COUNT] = { "Resume", "Join game", "Spectate", "Follow player", "Next player", "Previous player", "Free-fly", "Change team", "Settings", "Leave" };
 	return act >= 0 && act < TOUCHACT_COUNT ? labels[act] : "";
+}
+
+// The spectator state behind a HUD mode (TOUCHSPEC_*), for the same tables.
+static inline int TouchMode_SpecState(int mode)
+{
+	switch (mode)
+	{
+	case TOUCHMODE_OBSERVING: return TOUCHSPEC_OBSERVING;
+	case TOUCHMODE_FOLLOWING: return TOUCHSPEC_FOLLOWING;
+	case TOUCHMODE_OUT: return TOUCHSPEC_OUT;
+	case TOUCHMODE_OUT_FREE: return TOUCHSPEC_OUT_FREE;
+	default: return TOUCHSPEC_NONE;
+	}
 }
 
 // Moving to the spectators forfeits something mid-round in a round-based
@@ -284,6 +308,16 @@ static inline int TouchAct_State(const touchmode_t *m, int act)
 		if (TouchMode_IsOutOfRound(m->mode))
 			return TOUCHACT_ENABLED;
 		return TOUCHACT_HIDDEN;
+	case TOUCHACT_FOLLOW:
+		// Free-flying: there is nobody to watch yet, so start following.
+		return TouchSpec_Flying(TouchMode_SpecState(m->mode)) ? TOUCHACT_ENABLED : TOUCHACT_HIDDEN;
+	case TOUCHACT_NEXT:
+	case TOUCHACT_PREV:
+		// Watching a player (the bar's < and >), or out of the round.
+		return (m->mode == TOUCHMODE_FOLLOWING || m->mode == TOUCHMODE_OUT) ? TOUCHACT_ENABLED : TOUCHACT_HIDDEN;
+	case TOUCHACT_FREE:
+		// Back to free-fly: the bar's FREE, where the server keeps the view.
+		return m->mode == TOUCHMODE_FOLLOWING ? TOUCHACT_ENABLED : TOUCHACT_HIDDEN;
 	case TOUCHACT_TEAM:
 		if (!(m->flags & TOUCHMODE_F_TEAMS) || TouchMode_IsMatchEnd(m->mode))
 			return TOUCHACT_HIDDEN;
@@ -304,6 +338,10 @@ static inline const char *TouchAct_Command(const touchmode_t *m, int act)
 	case TOUCHACT_RESUME: return "togglemenu 0";
 	case TOUCHACT_JOIN: return "touch_join_dialog";
 	case TOUCHACT_SPECTATE: return "spec";
+	case TOUCHACT_FOLLOW:
+	case TOUCHACT_NEXT: return TOUCHACT_ATTACK_CMD;
+	case TOUCHACT_PREV: return TOUCHACT_PREV_CMD;
+	case TOUCHACT_FREE: return TOUCHACT_FREE_CMD;
 	case TOUCHACT_TEAM: return "touch_join_dialog";
 	case TOUCHACT_SETTINGS: return "menu_cmd settings";
 	case TOUCHACT_LEAVE: return "disconnect; g_campaign 0; menu_cmd sync; menu_cmd directmenu Welcome RESET";

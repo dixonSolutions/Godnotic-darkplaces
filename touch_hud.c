@@ -1508,11 +1508,11 @@ static void extra_release(finger_t *f);
 #define ROLE_TOSPEC  306
 #define ROLE_READY   307
 #define ROLE_RESPAWN 308
-#define ROLE_SPEC_ATTACK 300   // FOLLOW / NEXT: +attack while held
-#define ROLE_SPEC_PREV   301   // weapprev on the press
-#define ROLE_SPEC_FREE   302   // +attack2 while held
-#define ROLE_SPEC_UP     303   // +moveup while held
-#define ROLE_SPEC_DOWN   304   // +movedown while held
+#define ROLE_SPEC_ATTACK TOUCHSPEC_ROLE_ATTACK
+#define ROLE_SPEC_PREV   TOUCHSPEC_ROLE_PREV
+#define ROLE_SPEC_FREE   TOUCHSPEC_ROLE_FREE
+#define ROLE_SPEC_UP     TOUCHSPEC_ROLE_UP
+#define ROLE_SPEC_DOWN   TOUCHSPEC_ROLE_DOWN
 
 static int assign_role(float px, float py)
 {
@@ -2332,7 +2332,7 @@ void TouchHUD_Frame(void)
 		if (!f->used)
 			continue;
 		// a bar that was turned off under a held finger stops acting at once
-		if (!spec_bar_shown() && (f->role == ROLE_SPEC_ATTACK || f->role == ROLE_SPEC_PREV || f->role == ROLE_SPEC_FREE))
+		if (!TouchSpec_FingerActs(TouchUI_SpectatorState(), spec_bar_shown(), f->role))
 			continue;
 		switch (f->role)
 		{
@@ -2851,22 +2851,23 @@ static void spec_frame(qbool *fire, qbool *fire2, qbool *jump)
 	for (j = 0; j < MAX_FINGERS; j++)
 	{
 		finger_t *f = &fingers[j];
+		touchspec_keys_t k;
 		if (!f->used)
 			continue;
-		switch (f->role)
+		memset(&k, 0, sizeof(k));
+		TouchSpec_AddFinger(&k, state, spec_bar_shown(), f->role, !f->fired);
+		if (k.fire)
+			*fire = true;
+		if (k.fire2)
+			*fire2 = true;
+		if (k.up)
+			up = true;
+		if (k.down)
+			down = true;
+		if (k.prev)
 		{
-		case ROLE_SPEC_ATTACK: *fire = true; break;
-		case ROLE_SPEC_FREE: *fire2 = true; break;
-		case ROLE_SPEC_UP: up = true; break;
-		case ROLE_SPEC_DOWN: down = true; break;
-		case ROLE_SPEC_PREV:
-			if (!f->fired)
-			{
-				exec_now("weapprev");
-				f->fired = true;
-			}
-			break;
-		default: break;
+			exec_now("weapprev");
+			f->fired = true;
 		}
 	}
 	set_key("moveup", &key_moveup, up && TouchSpec_StickShown(state));

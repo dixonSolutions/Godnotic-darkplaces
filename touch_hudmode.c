@@ -23,8 +23,9 @@ Published, read-only (set every frame they change):
                        3 enabled with a confirm
 Commands:
   touch_action <id> [confirm]   runs one of those actions (resume, join,
-                       spectate, team, settings, leave). spectate:confirm
-                       needs "confirm"; without it the command only prints.
+                       spectate, follow, next, prev, free, team, settings,
+                       leave). spectate:confirm needs "confirm"; without it
+                       the command only prints.
   touch_join_dialog    opens the join dialog (the menu's Team Selection:
                        auto-select, the teams, spectate). It also opens by
                        itself for an observer when a match starts
@@ -58,6 +59,10 @@ static cvar_t pub_act[TOUCHACT_COUNT] = {
 	{CF_CLIENT | CF_READONLY, "_touch_act_resume", "0", "in-match menu action state: 0 hidden, 1 enabled, 2 disabled, 3 confirm; read-only"},
 	{CF_CLIENT | CF_READONLY, "_touch_act_join", "0", "in-match menu action state: 0 hidden, 1 enabled, 2 disabled, 3 confirm; read-only"},
 	{CF_CLIENT | CF_READONLY, "_touch_act_spectate", "0", "in-match menu action state: 0 hidden, 1 enabled, 2 disabled, 3 confirm; read-only"},
+	{CF_CLIENT | CF_READONLY, "_touch_act_follow", "0", "in-match menu action state: 0 hidden, 1 enabled, 2 disabled, 3 confirm; read-only"},
+	{CF_CLIENT | CF_READONLY, "_touch_act_next", "0", "in-match menu action state: 0 hidden, 1 enabled, 2 disabled, 3 confirm; read-only"},
+	{CF_CLIENT | CF_READONLY, "_touch_act_prev", "0", "in-match menu action state: 0 hidden, 1 enabled, 2 disabled, 3 confirm; read-only"},
+	{CF_CLIENT | CF_READONLY, "_touch_act_free", "0", "in-match menu action state: 0 hidden, 1 enabled, 2 disabled, 3 confirm; read-only"},
 	{CF_CLIENT | CF_READONLY, "_touch_act_team", "0", "in-match menu action state: 0 hidden, 1 enabled, 2 disabled, 3 confirm; read-only"},
 	{CF_CLIENT | CF_READONLY, "_touch_act_settings", "0", "in-match menu action state: 0 hidden, 1 enabled, 2 disabled, 3 confirm; read-only"},
 	{CF_CLIENT | CF_READONLY, "_touch_act_leave", "0", "in-match menu action state: 0 hidden, 1 enabled, 2 disabled, 3 confirm; read-only"},
@@ -341,7 +346,7 @@ static void TouchAction_f(cmd_state_t *cmd)
 			break;
 	if (act == TOUCHACT_COUNT)
 	{
-		Con_Printf("touch_action <resume|join|spectate|team|settings|leave> [confirm]; now: %s\n", pub_actions.string);
+		Con_Printf("touch_action <resume|join|spectate|follow|next|prev|free|team|settings|leave> [confirm]; now: %s\n", pub_actions.string);
 		return;
 	}
 	switch (TouchAct_State(&current, act))
@@ -421,5 +426,5 @@ void TouchHudMode_Init(void)
 	Cmd_AddCommand(CF_CLIENT, "touch_join_dialog", TouchJoinDialog_f, "open Xonotic's join dialog: auto-select, the teams the server offers, spectate");
 	Cmd_AddCommand(CF_CLIENT, "touch_join_answered", TouchJoinAnswered_f, "the game's own Welcome dialog (Join! / Spectate) was shown: the join dialog is not owed for this match");
 	Cmd_AddCommand(CF_CLIENT, "touch_join", TouchJoin_f, "what the join dialog's rows run: touch_join <auto|red|blue|yellow|pink|spectate>");
-	Cmd_AddCommand(CF_CLIENT, "touch_action", TouchAction_f, "run an in-match menu action: resume, join, spectate, team, settings, leave [confirm] (_touch_hud_actions lists them)");
+	Cmd_AddCommand(CF_CLIENT, "touch_action", TouchAction_f, "run an in-match menu action: resume, join, spectate, follow, next, prev, free, team, settings, leave [confirm] (_touch_hud_actions lists them)");
 }

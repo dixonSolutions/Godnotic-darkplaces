@@ -1492,11 +1492,17 @@ static qbool TouchWep_ShouldSwitchSmart(float held_u, qbool held_can_shoot, floa
 // The pull may close the gap to a target, but never against the way the
 // finger is turning: a rightward drag is not pulled left. Per axis; a finger
 // that is not turning leaves the pull free (a thumb at rest still tracks).
-static void TouchWep_PullWithFinger(float finger_yaw, float finger_pitch, float *pull_yaw, float *pull_pitch)
+// The turn is compared against a dead band of TW_PULL_DEADBAND_RATE per
+// second: the look filter's tail and an owed turn can leave a hundredth of a
+// degree per frame that is not the player aiming, and exact signs let that
+// tiny drift cancel the follow and settle terms.
+#define TW_PULL_DEADBAND_RATE 2.0f   // deg/s: below this the finger is at rest
+static void TouchWep_PullWithFinger(float finger_yaw, float finger_pitch, float dt, float *pull_yaw, float *pull_pitch)
 {
-	if (finger_yaw * *pull_yaw < 0)
+	float eps = TW_PULL_DEADBAND_RATE * dt;
+	if (fabsf(finger_yaw) > eps && finger_yaw * *pull_yaw < 0)
 		*pull_yaw = 0;
-	if (finger_pitch * *pull_pitch < 0)
+	if (fabsf(finger_pitch) > eps && finger_pitch * *pull_pitch < 0)
 		*pull_pitch = 0;
 }
 

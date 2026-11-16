@@ -29,16 +29,9 @@ float TouchTactics_TargetBonus(int entnum);
 // usual choice stands). Only with the gate open.
 int TouchTactics_PickWeapon(int entnum, float dist, const char *const *names, const qbool *ready, int n, int heldpos);
 
-// cl_touch_esp_enabled applied to an offline-gate result g: an off value
-// ("off", "0", "false", "no", empty) closes it, "local" and "1" leave it
-// (there is no server mode).
+// cl_touch_esp_enabled applied to an offline-gate result g: "off" closes it,
+// "local" leaves it (there is no server mode).
 int TouchTactics_EspGate(int g);
-
-// True when cl_touch_esp_enabled is off now, whatever its spelling.
-qbool TouchTactics_EspOff(void);
-
-// True when the player's switch is on (the offline environment is separate).
-qbool TouchTactics_EspOn(void);
 
 // True while the offline gate is open this frame (and the helpers may act).
 qbool TouchTactics_Open(void);

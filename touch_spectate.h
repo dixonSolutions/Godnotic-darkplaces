@@ -148,6 +148,51 @@ static inline int TouchSpec_BarShown(int state, int visible)
 	return state != TOUCHSPEC_NONE && visible != 0;
 }
 
+// The roles a finger holds on the bar. A finger that holds one stops acting
+// the moment the bar is turned off under it; the stick, fly rocker and look
+// are not the bar's and keep acting.
+#define TOUCHSPEC_ROLE_ATTACK 300   // FOLLOW / NEXT: +attack while held
+#define TOUCHSPEC_ROLE_PREV   301   // weapprev on the press
+#define TOUCHSPEC_ROLE_FREE   302   // +attack2 while held: back to free-fly
+#define TOUCHSPEC_ROLE_UP     303   // +moveup while held
+#define TOUCHSPEC_ROLE_DOWN   304   // +movedown while held
+
+static inline int TouchSpec_BarRole(int role)
+{
+	return role == TOUCHSPEC_ROLE_ATTACK || role == TOUCHSPEC_ROLE_PREV || role == TOUCHSPEC_ROLE_FREE;
+}
+
+// Whether a finger with this role acts this frame: a bar role only while the
+// bar is shown, every other role (stick, look, fly rocker) always.
+static inline int TouchSpec_FingerActs(int state, int visible, int role)
+{
+	return !TouchSpec_BarRole(role) || TouchSpec_BarShown(state, visible);
+}
+
+// What one finger's role contributes to the spectator frame.
+typedef struct touchspec_keys_s
+{
+	int fire, fire2, prev, up, down;
+} touchspec_keys_t;
+
+// Fold one held finger into the frame's outputs. Both the engine HUD and the
+// tests go through this: a bar that is not shown contributes no fire, attack2
+// or weapon command, even under a finger that is still down.
+static inline void TouchSpec_AddFinger(touchspec_keys_t *k, int state, int visible, int role, int first)
+{
+	if (state == TOUCHSPEC_NONE || !TouchSpec_FingerActs(state, visible, role))
+		return;
+	switch (role)
+	{
+	case TOUCHSPEC_ROLE_ATTACK: k->fire = 1; break;
+	case TOUCHSPEC_ROLE_FREE: k->fire2 = 1; break;
+	case TOUCHSPEC_ROLE_PREV: if (first) k->prev = 1; break;
+	case TOUCHSPEC_ROLE_UP: k->up = 1; break;
+	case TOUCHSPEC_ROLE_DOWN: k->down = 1; break;
+	default: break;
+	}
+}
+
 // ---------------------------------------------------------------------------
 // After a join from the join dialog ("cmd join"): a join the server does not
 // take (joining locked, teams full, spectate-only) leaves the player

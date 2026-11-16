@@ -39,6 +39,7 @@ primary, no lead, no switching.
 #include "touch_hook.h"
 #include "touch_tactics.h"
 #include "touch_assist.h"
+extern cvar_t cl_touch_esp_enabled;
 
 extern cvar_t vid_touchscreen;
 extern qbool cl_touch_csqc_active;
@@ -2953,7 +2954,7 @@ static void aim_frame(void)
 		if (practice_gate_now == TW_GATE_OPEN)
 			Con_Printf("touch aim: practice helpers: on (local match; see-through %d, full 360 %d, instant %d)\n", practice.seethrough, practice.full360, practice.instant);
 		else
-			Con_Printf("touch aim: practice helpers: off (%s)\n", TouchTactics_EspOff() ? "cl_touch_esp_enabled is off" : touch_practice_why[practice_gate_now]);
+			Con_Printf("touch aim: practice helpers: off (%s)\n", strcmp(cl_touch_esp_enabled.string, "off") ? touch_practice_why[practice_gate_now] : "cl_touch_esp_enabled is off");
 	}
 	practice_gate_said = practice_gate_now;
 	num_marks = 0;
@@ -3634,7 +3635,7 @@ static void aim_frame(void)
 			}
 			// never against the finger's own turn: closing the gap is help,
 			// pulling the view back is not
-			TouchWep_PullWithFinger(turn_yaw, turn_pitch, &py, &pp);
+			TouchWep_PullWithFinger(turn_yaw, turn_pitch, dt, &py, &pp);
 			cl.viewangles[YAW] += py;
 			cl.viewangles[PITCH] = bound(-89.0f, cl.viewangles[PITCH] + pp, 89.0f);
 		}
