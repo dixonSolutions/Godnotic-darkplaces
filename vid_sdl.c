@@ -721,6 +721,12 @@ static qbool VID_TouchscreenArea(int corner, float px, float py, float pwidth, f
 
 // ELUAN:
 // not reentrant, but we only need one mouse cursor anyway...
+// Touch: tracking stays active for fingers, but only a mouse gets a glyph.
+static qbool VID_TouchscreenCursorShown(qbool pointer_mouse)
+{
+	return pointer_mouse != 0;
+}
+
 static void VID_TouchscreenCursor(float px, float py, float pwidth, float pheight, qbool *resultbutton, keynum_t key)
 {
 	int finger;
@@ -760,7 +766,7 @@ static void VID_TouchscreenCursor(float px, float py, float pwidth, float pheigh
 				break;
 			}
 		}
-		if (scr_numtouchscreenareas < 128)
+		if (VID_TouchscreenCursorShown(vid_pointer_mouse.integer) && scr_numtouchscreenareas < 128)
 		{
 			if (clickrealtime + 1 > host.realtime)
 			{
@@ -1056,10 +1062,15 @@ qbool VID_TouchQueuedTap(float x0, float y0, float x1, float y1)
 	for (i = 0; i < n; i++)
 	{
 		if ((ev[i].type == SDL_KEYDOWN && (ev[i].key.keysym.sym == SDLK_AC_BACK || ev[i].key.keysym.sym == SDLK_ESCAPE))
-			|| (ev[i].type == SDL_FINGERDOWN && ev[i].tfinger.x >= x0 && ev[i].tfinger.x <= x1 && ev[i].tfinger.y >= y0 && ev[i].tfinger.y <= y1))
+			|| (ev[i].type == SDL_FINGERDOWN && ev[i].tfinger.x >= x0 && ev[i].tfinger.x <= x1 && ev[i].tfinger.y >= y0 && ev[i].tfinger.y <= y1)
+			|| (ev[i].type == SDL_MOUSEBUTTONDOWN && ev[i].button.which != SDL_TOUCH_MOUSEID && ev[i].button.button == SDL_BUTTON_LEFT
+				&& vid.mode.width > 0 && vid.mode.height > 0
+				&& ev[i].button.x >= x0 * vid.mode.width && ev[i].button.x <= x1 * vid.mode.width
+				&& ev[i].button.y >= y0 * vid.mode.height && ev[i].button.y <= y1 * vid.mode.height))
 		{
 			SDL_FlushEvents(SDL_FINGERDOWN, SDL_FINGERMOTION);
 			SDL_FlushEvents(SDL_KEYDOWN, SDL_KEYUP);
+			SDL_FlushEvents(SDL_MOUSEBUTTONDOWN, SDL_MOUSEBUTTONUP);
 			return true;
 		}
 	}
@@ -1661,7 +1672,7 @@ void Sys_EM_FitWindow(SDL_Window *window); // sys_wasm.c
 static void VID_UpdateMouseGrab(void)
 {
 	if (!vid_activewindow || key_consoleactive || scr_loading)
-		VID_SetMouse(false, false);
+		VID_SetMouse(false, vid_touchscreen.integer && !vid_pointer_mouse.integer); // Touch: no system pointer for a finger
 	else if (key_dest == key_menu || key_dest == key_menu_grabbed)
 #ifdef __EMSCRIPTEN__
 		// Menus follow the absolute pointer in a browser: relative mode means
@@ -1681,7 +1692,7 @@ static void VID_UpdateMouseGrab(void)
 	else
 	{
 		qbool mouse_aims = !vid_touchscreen.integer || VID_TouchMouselook();
-		VID_SetMouse(vid_mouse.integer && !cl.csqc_wantsmousemove && cl_prydoncursor.integer <= 0 && (!cls.demoplayback || cl_demo_mousegrab.integer) && mouse_aims, mouse_aims);
+		VID_SetMouse(vid_mouse.integer && !cl.csqc_wantsmousemove && cl_prydoncursor.integer <= 0 && (!cls.demoplayback || cl_demo_mousegrab.integer) && mouse_aims, mouse_aims || (vid_touchscreen.integer && !vid_pointer_mouse.integer)); // Touch: hide the system pointer for fingers
 	}
 
 	if (vid_touchscreen_mouselook.integer != (vid_touchscreen.integer && vid_usingmouse))
@@ -1784,6 +1795,7 @@ void Sys_SDL_HandleEvents(void)
 #endif
 			if (TouchShell_Mouse(event.type == SDL_MOUSEBUTTONDOWN, event.button.button, event.button.which == SDL_TOUCH_MOUSEID, event.button.x, event.button.y)) // Touch: console button
 				break;
+			if (TouchHUD_OverlayMouse(event.type == SDL_MOUSEBUTTONDOWN, event.button.button, event.button.which == SDL_TOUCH_MOUSEID, event.button.x, event.button.y, !vid_usingmouse)) break; // Touch: loading and match-end buttons
 			if (TouchHUD_JoinMouse(event.type == SDL_MOUSEBUTTONDOWN, event.button.button, event.button.which == SDL_TOUCH_MOUSEID, event.button.x, event.button.y, !vid_usingmouse)) break; // Touch: join handle click
 			if (event.type == SDL_MOUSEBUTTONDOWN && event.button.which != SDL_TOUCH_MOUSEID)
 			{

@@ -3106,6 +3106,51 @@ static qbool endmenu_finger(int type, int id, float nx, float ny)
 	return true;
 }
 
+// Real mouse clicks share the finger hit paths, in the same window-to-console
+// coordinates as the pointer. Synthetic mouse events belong to the finger path.
+qbool TouchHUD_OverlayMouse(qbool down, int button, qbool synthetic, float wx, float wy, qbool pointer_free)
+{
+	static qbool loading_held, menu_held;
+	float nx, ny;
+	if (button != 1 || synthetic || vid.mode.width <= 0 || vid.mode.height <= 0)
+		return false;
+	nx = wx / (float)vid.mode.width;
+	ny = wy / (float)vid.mode.height;
+	if (down)
+	{
+		float cx, cy, hx, hy;
+		if (!pointer_free) return false;
+		if (loading_cancellable())
+		{
+			loading_pill(&cx, &cy, &hx, &hy);
+			if (fabs(nx * ui_w() - cx) <= hx * 1.2f && fabs(ny * ui_h() - cy) <= hy * 1.2f)
+			{
+				loading_held = true;
+				loading_finger(-1, true, nx, ny);
+				return true;
+			}
+		}
+		if (endmenu_finger(0, -1, nx, ny))
+		{
+			menu_held = true;
+			return true;
+		}
+	}
+	else if (loading_held)
+	{
+		loading_held = false;
+		loading_finger(-1, false, nx, ny);
+		return true;
+	}
+	else if (menu_held)
+	{
+		menu_held = false;
+		endmenu_finger(2, -1, nx, ny);
+		return true;
+	}
+	return false;
+}
+
 // Every finger, from TouchVote_Finger before the finger table.
 qbool TouchHUD_OverlayFinger(int type, int id, float nx, float ny)
 {

@@ -100,6 +100,7 @@ void TouchHudMode_Reset(void);
 // 2 up; id = finger id + 1. True: the finger is theirs (TouchVote_Finger).
 qbool TouchHUD_OverlayFinger(int type, int id, float nx, float ny);
 // A real mouse button on the desk spectator bar while the pointer is free: true when eaten.
+qbool TouchHUD_OverlayMouse(qbool down, int button, qbool synthetic, float wx, float wy, qbool pointer_free);
 qbool TouchHUD_JoinMouse(qbool down, int button, qbool synthetic, float wx, float wy, qbool pointer_free);
 
 #endif
