@@ -192,15 +192,44 @@ static struct
 	vec3_t spot;
 } tt;
 
-// cl_touch_esp_enabled over the offline gate: "off" closes it; anything but
-// "local" or "off" is taken as "local" (said once).
+// The switch off, however it is spelled: the documented "off"/"0", the
+// "false"/"no" a hand edit or another UI writes, and an empty value.
+static qbool esp_disabled(const char *v)
+{
+	return !v || !v[0] || !strcmp(v, "0") || !strcasecmp(v, "off")
+		|| !strcasecmp(v, "false") || !strcasecmp(v, "no");
+}
+
+// True when cl_touch_esp_enabled is off now, whatever its spelling.
+qbool TouchTactics_EspOff(void)
+{
+	return esp_disabled(cl_touch_esp_enabled.string);
+}
+
+// The player's switch on its own: the offline environment is asked separately.
+qbool TouchTactics_EspOn(void)
+{
+	return TouchTactics_EspGate(TW_GATE_OPEN) == TW_GATE_OPEN;
+}
+
+// cl_touch_esp_enabled over the offline gate: an off value closes it; "local"
+// and the switch's "1" leave it. Any other value is taken as "local", said
+// once, as is an off alias that is not the documented "off" or "0".
 int TouchTactics_EspGate(int g)
 {
 	static char said[32];
 	const char *v = cl_touch_esp_enabled.string;
-	if (!strcmp(v, "off") || !strcmp(v, "0"))
+	if (esp_disabled(v))
+	{
+		if (v && v[0] && strcmp(v, "off") && strcmp(v, "0") && strcmp(said, v))
+		{
+			Con_Printf("cl_touch_esp_enabled \"%s\": only \"local\" or \"off\"; treating it as off\n", v);
+			dp_strlcpy(said, v, sizeof(said));
+		}
 		return TW_GATE_NO_SERVER;
-	if (strcmp(v, "local") && strcmp(said, v))
+	}
+	if (strcasecmp(v, "local") && strcmp(v, "1") && strcasecmp(v, "true") && strcasecmp(v, "yes") && strcasecmp(v, "on")
+		&& strcmp(said, v))
 	{
 		Con_Printf("cl_touch_esp_enabled \"%s\": only \"local\" or \"off\"; using local (these helpers never run on a server with other people)\n", v);
 		dp_strlcpy(said, v, sizeof(said));
@@ -210,7 +239,7 @@ int TouchTactics_EspGate(int g)
 
 static const char *gate_why(int g)
 {
-	if (g != TW_GATE_OPEN && (!strcmp(cl_touch_esp_enabled.string, "off") || !strcmp(cl_touch_esp_enabled.string, "0")))
+	if (g != TW_GATE_OPEN && TouchTactics_EspOff())
 		return "cl_touch_esp_enabled is off";
 	return touch_practice_why[g];
 }
