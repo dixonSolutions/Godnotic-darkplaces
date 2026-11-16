@@ -355,7 +355,7 @@ static inline const char *TouchAct_Command(const touchmode_t *m, int act)
 // touchscreen. It is owed once per match to a player who starts it as an
 // observer, and opens when that has lasted a moment and nothing else has the
 // screen; after that it is the MENU sheet's "Join game" (observing) and
-// "Change team". A game hosted on this device with no team to pick skips it:
+// "Change team". A campaign with no team choice skips it:
 // the player goes straight in ("cmd join", a few tries while the server is
 // not ready for it). Picking Spectate, or being in the game once, settles
 // it: spectating later in the same match is the player's own choice.
@@ -376,8 +376,8 @@ typedef struct touchjoindlg_s
 	double next;    // nothing before this time
 } touchjoindlg_t;
 
-// One frame. local_game: the server is this process. campaign: the campaign
-// joins by itself. screen_free: the game has the screen (no menu, console,
+// campaign: 0 outside a campaign, 1 with team choice, 2 with a fixed team.
+// local_game: the server is this process. screen_free: the game has the screen (no menu, console,
 // chat sheet or CSQC pointer UI). enabled: touch_join_dialog allows it here.
 static inline int TouchJoinDlg_Frame(touchjoindlg_t *d, int mode, int flags, int local_game, int campaign, int screen_free, int enabled, double now)
 {
@@ -401,13 +401,13 @@ static inline int TouchJoinDlg_Frame(touchjoindlg_t *d, int mode, int flags, int
 		d->since = 0;
 		return TOUCHJOINDLG_NOTHING;
 	}
-	if (!d->owed || campaign)
+	if (!d->owed)
 		return TOUCHJOINDLG_NOTHING;
 	if (!d->since)
 		d->since = now;
 	if (now - d->since < TOUCHJOINDLG_SETTLE || now < d->next || !screen_free)
 		return TOUCHJOINDLG_NOTHING;
-	if (local_game && !(flags & TOUCHMODE_F_TEAMS) && d->tries > 0)
+	if (local_game && campaign && (!(flags & TOUCHMODE_F_TEAMS) || campaign == 2) && d->tries > 0)
 	{
 		d->tries--;
 		d->next = now + TOUCHJOINDLG_RETRY;

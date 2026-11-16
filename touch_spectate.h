@@ -127,7 +127,7 @@ static inline const char *TouchSpec_BarLabel(int state, int part)
 		return "<";
 	if (part == TOUCHSPEC_BAR_NEXT)
 		return ">";
-	return TouchSpec_ActionLabel(action);
+	return action == TOUCHSPEC_ACT_FOLLOW ? "FREE" : TouchSpec_ActionLabel(action);
 }
 
 // The move stick, the look drag and the fly rocker work only while free-
@@ -137,20 +137,16 @@ static inline int TouchSpec_StickShown(int state)
 	return TouchSpec_Flying(state);
 }
 
-// The bar (previous | follow or free | next) is off by default on a touch
-// screen: following is a choice the player turns on in Touch controls, not a
-// control in the way while they watch. Following stays reachable from MENU
-// (the join / spectate rows), and the setting is touch_specbar_visible.
-#define TOUCHSPEC_BAR_DEFAULT 0
+// The spectator bar is always available, including for existing installs.
+#define TOUCHSPEC_BAR_DEFAULT 1
 
 static inline int TouchSpec_BarShown(int state, int visible)
 {
-	return state != TOUCHSPEC_NONE && visible != 0;
+	(void)visible;
+	return state != TOUCHSPEC_NONE;
 }
 
-// The roles a finger holds on the bar. A finger that holds one stops acting
-// the moment the bar is turned off under it; the stick, fly rocker and look
-// are not the bar's and keep acting.
+// The roles a finger holds on the spectator bar.
 #define TOUCHSPEC_ROLE_ATTACK 300   // FOLLOW / NEXT: +attack while held
 #define TOUCHSPEC_ROLE_PREV   301   // weapprev on the press
 #define TOUCHSPEC_ROLE_FREE   302   // +attack2 while held: back to free-fly
@@ -162,8 +158,7 @@ static inline int TouchSpec_BarRole(int role)
 	return role == TOUCHSPEC_ROLE_ATTACK || role == TOUCHSPEC_ROLE_PREV || role == TOUCHSPEC_ROLE_FREE;
 }
 
-// Whether a finger with this role acts this frame: a bar role only while the
-// bar is shown, every other role (stick, look, fly rocker) always.
+// Whether a finger with this role acts this frame.
 static inline int TouchSpec_FingerActs(int state, int visible, int role)
 {
 	return !TouchSpec_BarRole(role) || TouchSpec_BarShown(state, visible);
@@ -176,8 +171,7 @@ typedef struct touchspec_keys_s
 } touchspec_keys_t;
 
 // Fold one held finger into the frame's outputs. Both the engine HUD and the
-// tests go through this: a bar that is not shown contributes no fire, attack2
-// or weapon command, even under a finger that is still down.
+// tests go through this, including when an old setting was saved as off.
 static inline void TouchSpec_AddFinger(touchspec_keys_t *k, int state, int visible, int role, int first)
 {
 	if (state == TOUCHSPEC_NONE || !TouchSpec_FingerActs(state, visible, role))

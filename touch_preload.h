@@ -18,8 +18,9 @@
 // (once the client has its precache list and CSQC is up, before the first
 // game frame), the entries are loaded in the order models, pictures, shaders,
 // sounds, within touch_preload_budget ms. A first game on a map with no list
-// uses the built-in seed below, capped by touch_preload_seed_budget. Remaining
-// seed entries are processed in budgeted menu frames after loading, in the
+// uses the built-in seed below in full. With touch_preload_defer enabled, the
+// seed is capped by touch_preload_seed_budget and remaining entries run in
+// budgeted menu frames after loading, in the
 // same order; an individual asset may exceed either budget. Active play never
 // runs this background queue. The seed covers bot models, common weapons and
 // other assets observed in the first seconds of a match.
@@ -32,6 +33,7 @@
 
 static cvar_t touch_preload = {CF_CLIENT, "touch_preload", "1", "load what earlier games on this map loaded late (models, sounds, GLSL shaders) under the loading screen before the first game frame, and record what this game loads late (Godnotic); 0 = neither"};
 static cvar_t touch_preload_budget = {CF_CLIENT, "touch_preload_budget", "4000", "milliseconds the preload may add to a map load at most"};
+static cvar_t touch_preload_defer = {CF_CLIENT, "touch_preload_defer", "0", "defer seed work over the loading budget to menu render frames (experimental)"};
 static cvar_t touch_preload_seed_budget = {CF_CLIENT, "touch_preload_seed_budget", "400", "milliseconds of seed work during loading (one asset may exceed the budget)"};
 static cvar_t touch_preload_frame_budget = {CF_CLIENT, "touch_preload_frame_budget", "8", "milliseconds per frame for deferred seed work while a menu is open (one asset may exceed the budget)"};
 static cvar_t touch_preload_keep = {CF_CLIENT, "touch_preload_keep", "4", "an entry of a map's preload list is dropped once that many games on the map did not need it"};
@@ -65,6 +67,7 @@ static struct
 	qbool glsl_pending;
 	double glsl_begin;
 	int pending;
+	model_t *pending_world; // world for which the deferred seed was queued
 	int late_count;
 	double late_ms;
 }
@@ -174,6 +177,7 @@ static qbool TP_Open(const char *map)
 	TP_Save();
 	tp.count = 0;
 	tp.pending = 0;
+	tp.pending_world = NULL;
 	tp.dirty = false;
 	dp_strlcpy(tp.map, map, sizeof(tp.map));
 	TP_Path(path, sizeof(path), map);
@@ -328,11 +332,12 @@ static void TP_Replay(void)
 	double start = Sys_DirtyTime(), budget, t0;
 	double spent[4] = {0, 0, 0, 0};
 	int n[4] = {0, 0, 0, 0}, pass, i, skipped = 0;
-	qbool have, seed;
+	qbool have, seed, defer;
 	if (!touch_preload.integer || !cl.worldbasename[0])
 		return;
 	have = TP_Open(cl.worldbasename);
 	seed = !have && touch_preload_seed.integer;
+	defer = seed && touch_preload_defer.integer;
 	if (seed)
 	{
 		for (i = 0; tp_seed[i]; i++)
@@ -343,6 +348,8 @@ static void TP_Replay(void)
 		}
 	}
 	budget = (seed ? min(touch_preload_budget.value, touch_preload_seed_budget.value) : touch_preload_budget.value) * 0.001;
+	if (defer)
+		tp.pending_world = cl.worldmodel;
 	tp.replaying = true;
 	for (pass = 0; pass < 4; pass++)
 		for (i = 0; i < tp.count; i++)
@@ -350,7 +357,7 @@ static void TP_Replay(void)
 			tp_entry_t *e = &tp.list[i];
 			if (TP_KindOrder(e->kind) != pass)
 				continue;
-			if (Sys_DirtyTime() - start >= budget)
+			if ((!seed || defer) && Sys_DirtyTime() - start >= budget)
 			{
 				if (seed) { e->pending = true; tp.pending++; }
 				skipped++;
@@ -370,13 +377,23 @@ static void TP_Replay(void)
 			have ? "map" : (seed ? "seed" : "none"), tp.count, n[0], spent[0] * 1000.0, n[1], spent[1] * 1000.0, n[2], spent[2] * 1000.0, n[3], spent[3] * 1000.0, skipped);
 }
 
-// Only run deferred work behind a menu: an individual asset can be slower
-// than the frame budget. Stop immediately on disconnect or a map change.
+// Called only after a screen draw, on the renderer's thread with its context
+// current. Recheck before every load: a load may itself change client state.
+static qbool TP_DeferredSafe(void)
+{
+	return touch_preload.integer && touch_preload_defer.integer && tp.pending_world
+		&& cl.worldmodel == tp.pending_world && r_main_mempool && !vid_hidden
+		&& vid.mode.width > 0 && vid.mode.height > 0
+		&& cls.state == ca_connected && cls.signon == SIGNONS
+		&& !tlt.loading && !scr_loading && key_dest != key_game
+		&& !strcmp(tp.map, cl.worldbasename);
+}
+
 static void TP_Deferred(void)
 {
 	double start = Sys_DirtyTime(), budget = touch_preload_frame_budget.value * 0.001;
 	int pass, i;
-	if (!tp.pending || budget <= 0 || cls.state != ca_connected || cls.signon != SIGNONS || scr_loading || key_dest == key_game || strcmp(tp.map, cl.worldbasename))
+	if (!tp.pending || budget <= 0 || !TP_DeferredSafe())
 		return;
 	tp.replaying = true;
 	for (pass = 0; pass < 4; pass++)
@@ -385,6 +402,8 @@ static void TP_Deferred(void)
 			tp_entry_t *e = &tp.list[i];
 			if (!e->pending || TP_KindOrder(e->kind) != pass)
 				continue;
+			if (!TP_DeferredSafe())
+				goto done;
 			e->pending = false;
 			tp.pending--;
 			TP_Load(e);
@@ -450,8 +469,6 @@ static void TP_Frame(double now)
 	}
 	if (!tlt.loading)
 		tp.done = false;
-	if (!tlt.loading)
-		TP_Deferred();
 	// written soon after anything new, so a killed app keeps it
 	if (tp.dirty && now - tp.last_save > 2 && cls.state == ca_connected && cls.signon == SIGNONS)
 		TP_Save();
@@ -463,6 +480,7 @@ static void TP_Init(void)
 {
 	Cvar_RegisterVariable(&touch_preload);
 	Cvar_RegisterVariable(&touch_preload_budget);
+	Cvar_RegisterVariable(&touch_preload_defer);
 	Cvar_RegisterVariable(&touch_preload_seed_budget);
 	Cvar_RegisterVariable(&touch_preload_frame_budget);
 	Cvar_RegisterVariable(&touch_preload_keep);

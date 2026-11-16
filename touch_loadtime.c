@@ -269,6 +269,8 @@ void TouchLoadTime_Frame(void)
 	double now = Sys_DirtyTime();
 	int i;
 
+	// cl_screen calls this after drawing, with the render context current.
+	TP_Deferred();
 	TLT_Signons(now);
 
 	// font sizes r_font_lazysizes left for later: all of them under a load's

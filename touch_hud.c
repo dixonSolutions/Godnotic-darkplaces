@@ -2742,9 +2742,7 @@ static qbool spec_hud(void)
 	return TouchHUD_Active() && TouchUI_SpectatorState() != TOUCHSPEC_NONE;
 }
 
-// Off by default on a touch screen (touch_specbar_visible): following is a
-// setting, not a control in the way while the player watches. The desk strip
-// has its own switch (touch_desk_specbar).
+// The spectator controls remain available even with an older saved setting.
 static qbool spec_bar_shown(void)
 {
 	return TouchSpec_BarShown(TouchUI_SpectatorState(), (int)cv("touch_specbar_visible", TOUCHSPEC_BAR_DEFAULT)) != 0;
@@ -2893,7 +2891,7 @@ static void draw_spec_bar(int state, float a)
 			held = role_owned(ROLE_SPEC_FREE);
 		else if (action != TOUCHSPEC_ACT_NONE)
 			held = role_owned(ROLE_SPEC_ATTACK) && key_attack;
-		widget_capsule(cx, cy, hx, hy, label, held, false, action == TOUCHSPEC_ACT_NONE ? a * 0.6f : a, C_ACCENT);
+		widget_capsule(cx, cy, hx, hy, label, held || (part == TOUCHSPEC_BAR_MAIN && TouchSpec_Flying(state)), false, action == TOUCHSPEC_ACT_NONE ? a * 0.6f : a, C_ACCENT);
 	}
 	// who is being watched, over the bar
 	if (target[0])
