@@ -129,7 +129,7 @@ static float widget_radius(float nsize)
 static float cv(const char *name, float def);
 static float stick_radius(void)
 {
-	return max(widget_radius(cv("touch_move_size", 0.300f)), TOUCHDP_STICK_RADIUS * dp_units());
+	return max(widget_radius(cv("touch_move_size", 0.400f)), TOUCHDP_STICK_RADIUS * dp_units());
 }
 static void widget_half(float nsize, float aspect, float *hx, float *hy)
 {
@@ -1520,7 +1520,7 @@ static int assign_role(float px, float py)
 		return ROLE_RELOAD;
 	if (cv("touch_dodge_visible", 0) && hit_circle(px, py, cv("touch_dodge_x", 0.165f), cv("touch_dodge_y", 0.480f), cv("touch_dodge_size", 0.100f), 1.10f))
 		return ROLE_DODGE;
-	if (in_move_zone(px, py) || (cv("touch_move_visible", 1) && hit_circle(px, py, cv("touch_move_x", 0.170f), cv("touch_move_y", 0.680f), cv("touch_move_size", 0.300f), 1.0f)))
+	if (in_move_zone(px, py) || (cv("touch_move_visible", 1) && hit_circle(px, py, cv("touch_move_x", 0.170f), cv("touch_move_y", 0.680f), cv("touch_move_size", 0.400f), 1.0f)))
 	{
 		if (role_owned(ROLE_MOVE))
 			return ROLE_IGNORED;
@@ -2179,13 +2179,9 @@ void TouchHUD_Frame(void)
 				look_begin();
 			if (f->role == ROLE_MOVE)
 			{
-				// the stick's centre: under the thumb, or its drawn place
-				float r = stick_radius();
+				// The stick stays fixed; an off-centre landing immediately moves relative to it.
 				stick_held = true;
-				if (cv("touch_stick_float", 1))
-					TouchStick_Land(&stick, px, py, r, ui_w(), ui_h());
-				else
-					widget_center(cv("touch_move_x", 0.170f), cv("touch_move_y", 0.680f), &stick.cx, &stick.cy);
+				widget_center(cv("touch_move_x", 0.170f), cv("touch_move_y", 0.680f), &stick.cx, &stick.cy);
 			}
 			if (f->role == ROLE_JUMP)
 				hop_press_time = now;
@@ -2292,7 +2288,7 @@ void TouchHUD_Frame(void)
 		{
 		case ROLE_MOVE:
 			TouchStick_Read(&stick, f->last_x, f->last_y, stick_radius() * max(0.1f, cv("touch_stick_range", 1.0f)),
-				cv("touch_stick_follow", 1) != 0 && cv("touch_stick_float", 1) != 0,
+				false,
 				cv("touch_stick_deadzone", 0.12f), cv("touch_stick_run", 0.6f), &stick_axis_x, &stick_axis_y, &move_off_x, &move_off_y);
 			move_active = true;
 			break;
@@ -2614,7 +2610,7 @@ static void draw_move_stick(float a)
 		return;
 	if (stick_held)
 	{
-		// floating: drawn where the thumb put it
+		// Keep the visual ring fixed; only the knob follows the finger.
 		cx = stick.cx;
 		cy = stick.cy;
 	}
@@ -2777,7 +2773,7 @@ static int assign_spec_role(float px, float py)
 				return up ? ROLE_SPEC_UP : ROLE_SPEC_DOWN;
 		}
 		if (in_move_zone(px, py)
-			|| (cv("touch_move_visible", 1) && hit_circle(px, py, cv("touch_move_x", 0.170f), cv("touch_move_y", 0.680f), cv("touch_move_size", 0.300f), 1.0f)))
+			|| (cv("touch_move_visible", 1) && hit_circle(px, py, cv("touch_move_x", 0.170f), cv("touch_move_y", 0.680f), cv("touch_move_size", 0.400f), 1.0f)))
 			return role_owned(ROLE_MOVE) ? ROLE_IGNORED : ROLE_MOVE;
 	}
 	return role_owned(ROLE_LOOK) ? ROLE_IGNORED : ROLE_LOOK;
