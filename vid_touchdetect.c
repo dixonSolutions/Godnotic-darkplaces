@@ -590,10 +590,20 @@ static void vid_reapply(const char *why, const char *msg_on, const char *msg_off
 // The cursor follows the pointer last used (vid_pointer_mouse): a finger hides
 // it, the mouse brings it back. Only the cursor -- not the controls, which
 // follow presence alone.
+// One place that changes the pointer source, so the headless cursor test can
+// watch every transition (vid_pointer_debug).
+static void vid_pointer_set(float mouse)
+{
+	if (vid_pointer_mouse.integer == (int)mouse)
+		return;
+	Cvar_SetValueQuick(&vid_pointer_mouse, mouse);
+	if (vid_pointer_debug.integer)
+		Con_Printf("POINTER %d\n", (int)mouse);
+}
+
 static void vid_pointer_is_finger(void)
 {
-	if (vid_pointer_mouse.integer)
-		Cvar_SetValueQuick(&vid_pointer_mouse, 0);
+	vid_pointer_set(0);
 }
 
 static void vid_touch_used(void)
@@ -653,7 +663,7 @@ void VID_NoteMouseUse(float travel, qbool press)
 	// Back to the mouse: the cursor shows again. Not within a moment of a
 	// finger, which on X11 can arrive followed by pointer events it emulated.
 	if (!vid_pointer_mouse.integer && (press || travel > 0) && host.realtime - vid_touch_last > 0.25)
-		Cvar_SetValueQuick(&vid_pointer_mouse, 1);
+		vid_pointer_set(1);
 	if (!press && travel <= 0)
 		return;
 	if (vid_mouse_confirmed)

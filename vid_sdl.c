@@ -1031,7 +1031,7 @@ static qbool VID_TouchIsDirect(SDL_TouchID id)
 		return false;
 #endif
 	type = SDL_GetTouchDeviceType(id);
-	return type == SDL_TOUCH_DEVICE_DIRECT || type == SDL_TOUCH_DEVICE_INVALID;
+	return type == SDL_TOUCH_DEVICE_DIRECT; // Touch: an unknown device cannot establish direct finger use
 }
 
 qbool VID_SDL_HasTouchDevices(void)
