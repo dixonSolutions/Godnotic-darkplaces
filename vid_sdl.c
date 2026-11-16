@@ -1669,10 +1669,14 @@ static void VID_UpdateMouseGrab(void)
 		// Esc, leaving the menu cursor frozen until the next click.
 		VID_SetMouse(false, true);
 #else
-		// The system cursor is always hidden in menus: the menu draws its own
-		// while a mouse is the pointer in use (vid_pointer_mouse), and none
-		// after a finger. Showing both put two cursors on top of each other.
-		VID_SetMouse(vid_mouse.integer && !in_client_mouse && !vid_touchscreen.integer, true);
+		// Outside touch mode the menu draws the pointer itself, so the system
+		// cursor stays hidden. In touch mode it cannot be trusted to: a mouse
+		// plugged into a phone or tablet showed no cursor at all because the
+		// menu's own pointer was not being drawn. With a mouse as the pointer
+		// (vid_pointer_mouse) the system cursor is shown instead, and it goes
+		// away again the moment a finger is the pointer.
+		VID_SetMouse(vid_mouse.integer && !in_client_mouse && !vid_touchscreen.integer,
+			!(vid_touchscreen.integer && vid_pointer_mouse.integer));
 #endif
 	else
 	{
