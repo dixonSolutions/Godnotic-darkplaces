@@ -81,6 +81,7 @@ static qbool vid_hasfocus = false;
 static qbool vid_wmborder_waiting, vid_wmborderless;
 static SDL_Joystick *vid_sdljoystick = NULL;
 static SDL_GameController *vid_sdlgamecontroller = NULL;
+static cvar_t vid_system_cursor = {CF_CLIENT | CF_READONLY, "vid_system_cursor", "1", "SDL menus use the system pointer and absolute coordinates"}; // Touch
 static cvar_t joy_sdl2_trigger_deadzone = {CF_ARCHIVE | CF_CLIENT, "joy_sdl2_trigger_deadzone", "0.5", "deadzone for triggers to be registered as key presses"};
 // GAME_STEELSTORM specific
 static cvar_t *steelstorm_showing_map = NULL; // detect but do not create the cvar
@@ -1674,21 +1675,7 @@ static void VID_UpdateMouseGrab(void)
 	if (!vid_activewindow || key_consoleactive || scr_loading)
 		VID_SetMouse(false, vid_touchscreen.integer && !vid_pointer_mouse.integer); // Touch: no system pointer for a finger
 	else if (key_dest == key_menu || key_dest == key_menu_grabbed)
-#ifdef __EMSCRIPTEN__
-		// Menus follow the absolute pointer in a browser: relative mode means
-		// pointer lock, which needs a click to get and the browser drops on
-		// Esc, leaving the menu cursor frozen until the next click.
-		VID_SetMouse(false, true);
-#else
-		// Outside touch mode the menu draws the pointer itself, so the system
-		// cursor stays hidden. In touch mode it cannot be trusted to: a mouse
-		// plugged into a phone or tablet showed no cursor at all because the
-		// menu's own pointer was not being drawn. With a mouse as the pointer
-		// (vid_pointer_mouse) the system cursor is shown instead, and it goes
-		// away again the moment a finger is the pointer.
-		VID_SetMouse(vid_mouse.integer && !in_client_mouse && !vid_touchscreen.integer,
-			!(vid_touchscreen.integer && vid_pointer_mouse.integer));
-#endif
+		VID_SetMouse(false, vid_touchscreen.integer && !vid_pointer_mouse.integer); // Touch: system pointer in menus, hidden for fingers
 	else
 	{
 		qbool mouse_aims = !vid_touchscreen.integer || VID_TouchMouselook();
@@ -1814,6 +1801,7 @@ void Sys_SDL_HandleEvents(void)
 			// are on. In the game a made-up click used to fire while the
 			// controls were off, and the finger that turned them on then had
 			// its release dropped, which held fire down for good.
+			if (event.button.which != SDL_TOUCH_MOUSEID && (key_dest == key_menu || key_dest == key_menu_grabbed)) VID_SetWindowMouse(event.button.x, event.button.y); // Touch: hit test at the click position
 			if (event.button.button > 0 && event.button.button <= ARRAY_SIZE(buttonremap))
 			{
 				static qbool synth_down[ARRAY_SIZE(buttonremap)];
@@ -2431,6 +2419,9 @@ void VID_Init (void)
 	VID_TouchDetect_Init();
 	TouchDisplay_Init(); // Touch: vid_touch_dpi for the menu size
 	Cvar_RegisterVariable(&joy_sdl2_trigger_deadzone);
+#if !defined(DP_MOBILETOUCH) || defined(__ANDROID__)
+	Cvar_RegisterVariable(&vid_system_cursor); // Touch
+#endif
 
 	Cvar_RegisterCallback(&vid_display,                VID_ApplyDisplayMode_c);
 	Cvar_RegisterCallback(&vid_fullscreen,             VID_ApplyDisplayMode_c);
