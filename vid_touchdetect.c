@@ -1162,7 +1162,12 @@ void VID_ApplyTouchscreenMode(void)
 		if (!pointer_set && vid_presence_settled())
 		{
 			pointer_set = true;
-			if (has_touch && !vid_presence_get()->mouse)
+			// Any touchscreen starts with no pointer on screen. A mouse the
+			// system merely lists is not a mouse the player is using - Android
+			// reports one on a plain tablet - so the cursor appears only when
+			// the mouse actually moves (VID_NoteMouseUse) and goes again on a
+			// finger. That is the dynamic cursor: never shown until used.
+			if (has_touch)
 				Cvar_SetValueQuick(&vid_pointer_mouse, 0);
 		}
 	}
