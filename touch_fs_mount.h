@@ -17,6 +17,12 @@
 // fs_mountpack_count counts successful mounts; the menu QuakeC can watch it
 // to refresh its map list (maps whose pack is installed become playable).
 
+// cd_shared.c: 0 not playing, 1 playing, -1 tried and failed. A pack that
+// lands after the menu asked for its track leaves this at -1, and
+// CDAudio_Update only retries while it is 0, so clear it when the track list
+// arrives: the next frame starts the playlist.
+extern int music_playlist_playing;
+
 static cvar_t fs_mountpack_count = {CF_CLIENT | CF_SERVER | CF_READONLY, "fs_mountpack_count", "0", "number of packs fs_mountpack added since start-up (Godnotic)"};
 
 static void TouchFS_MountPack_f(cmd_state_t *cmd)
@@ -86,6 +92,10 @@ static void TouchFS_MountPack_f(cmd_state_t *cmd)
 	// once at start-up: without it the session has no "cd loop <n>" names.
 	if (!hadtracks && FS_FileExists("cdtracks.cfg"))
 		Cbuf_AddText(cmd, "\nset _cdtrack_first 1; alias _cdtrack_0 \"g_cdtracks_remaplist \\\"$g_cdtracks_remaplist $1\\\"\"; alias _cdtrack_1 \"g_cdtracks_remaplist \\\"$1\\\"; set _cdtrack_first 0\"; alias _cdtrack \"_cdtrack_$_cdtrack_first $2\"\nset g_cdtracks_remaplist \"\"\nexec cdtracks.cfg\nunset _cdtrack_first; unalias _cdtrack_0; unalias _cdtrack_1; unalias _cdtrack\nif_client cd remap $g_cdtracks_remaplist\n");
+
+		// the menu may have asked for a track before this pack existed;
+		// a failed attempt is sticky (-1), so let CDAudio_Update try again
+		music_playlist_playing = 0;
 }
 
 /// fs_rescan rebuilds the search path: what the menu lists may have changed
