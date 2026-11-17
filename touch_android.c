@@ -41,6 +41,7 @@ foreground service while there is something to keep alive.
 #include <EGL/egl.h>
 #include "libcurl.h"
 #include "touch_hud.h"
+#include "touch_hudmode.h"
 #include "touch_lan.h"
 #include "touch_lan_logic.h"
 #include "touch_net.h"
@@ -220,6 +221,26 @@ static void publish_netstate(void)
 	dp_strlcpy(last, state, sizeof(last));
 }
 
+// A separate update gate: touch_netstate intentionally calls local bot games idle.
+// Joining is busy too, so a restart cannot interrupt a match being entered.
+static void publish_update_state(void)
+{
+	static int last = -1;
+	int busy;
+	qfile_t *f;
+	TouchHudMode_Update();
+	busy = (cls.connect_trying || cls.state == ca_connected || sv.active)
+		&& !TouchMode_IsMatchEnd(TouchHudMode_Current()->mode);
+	if (busy == last)
+		return;
+	f = FS_OpenRealFile("touch_update_game_state", "wb", false);
+	if (!f)
+		return;
+	FS_Print(f, busy ? "busy\n" : "safe\n");
+	FS_Close(f);
+	last = busy;
+}
+
 // Away with nothing to keep going, or in a local game: wait for the return.
 // The events stay queued for the next frame's loop, which hears the return.
 static void wait_while_idle(void)
@@ -248,6 +269,7 @@ void TouchAndroid_AfterEvents(void)
 	if (away)
 		vid_hidden = true; // whatever window events came in meanwhile
 	publish_netstate();
+	publish_update_state();
 	wait_while_idle();
 	rebind_context();
 	if (load_resume)
