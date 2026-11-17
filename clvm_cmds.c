@@ -6,6 +6,7 @@
 #include "r_shadow.h"
 #include "jpeg.h"
 #include "image.h"
+#include "touch_hud.h" // Touch
 
 //============================================================================
 // Client
@@ -1785,6 +1786,7 @@ void VM_drawpic(prvm_prog_t *prog)
 	prog->polygonbegin_guess2d = true;
 
 	picname = PRVM_G_STRING(OFS_PARM1);
+	if (prog == CLVM_prog && TouchHUD_HideCursorPic(picname)) { PRVM_G_FLOAT(OFS_RETURN) = 1; return; } // Touch: SDL owns the pointer
 	VM_CheckEmptyString(prog, picname);
 
 	// is pic cached ? no function yet for that

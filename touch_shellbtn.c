@@ -167,7 +167,7 @@ static void place(void)
 	}
 	// The published HUD mode, not a guess of our own: the map vote that follows
 	// the scoreboard is a match end too, and cl.intermission alone missed it.
-	else if (cl.intermission || TouchMode_IsMatchEnd(TouchHudMode_Current()->mode))
+	else if ((cl.intermission || TouchMode_IsMatchEnd(TouchHudMode_Current()->mode)) && !in_match())
 	{
 		// End of the match (scoreboard, map vote): the touch HUD and its MENU
 		// pill are gone, so beside where MENU was the button floated alone

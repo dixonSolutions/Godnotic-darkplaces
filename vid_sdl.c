@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <ctype.h>
 
 #include "quakedef.h"
+#include "touch_cursor.h" // Touch
 #include "image.h"
 #include "utf8lib.h"
 #include "touch_ui.h"
@@ -474,6 +475,7 @@ qbool VID_ShowingKeyboard(void)
 
 static void VID_SetMouse(qbool relative, qbool hidecursor)
 {
+	if (vid_touchscreen.integer && !vid_pointer_mouse.integer) hidecursor = true; // Touch: every SDL cursor path hides the finger pointer
 	// Android too: with a keyboard and mouse attached the touch controls go
 	// away, and mouselook needs relative mode (pointer capture, Android 8+).
 #if !defined(DP_MOBILETOUCH) || defined(__ANDROID__)
@@ -1679,7 +1681,7 @@ static void VID_UpdateMouseGrab(void)
 	else
 	{
 		qbool mouse_aims = !vid_touchscreen.integer || VID_TouchMouselook();
-		VID_SetMouse(vid_mouse.integer && !cl.csqc_wantsmousemove && cl_prydoncursor.integer <= 0 && (!cls.demoplayback || cl_demo_mousegrab.integer) && mouse_aims, mouse_aims || (vid_touchscreen.integer && !vid_pointer_mouse.integer)); // Touch: hide the system pointer for fingers
+		VID_SetMouse(vid_mouse.integer && !cl.csqc_wantsmousemove && cl_prydoncursor.integer <= 0 && (!cls.demoplayback || cl_demo_mousegrab.integer) && mouse_aims, TouchCursor_HideSystem(vid_touchscreen.integer, vid_pointer_mouse.integer, mouse_aims, cl.csqc_wantsmousemove, cl_prydoncursor.integer > 0)); // Touch: system cursor for mouse pointer UIs, never fingers
 	}
 
 	if (vid_touchscreen_mouselook.integer != (vid_touchscreen.integer && vid_usingmouse))

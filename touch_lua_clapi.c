@@ -16,8 +16,9 @@ Events come from three places:
 The offline-only rule (touch_weapons.h TouchWep_PracticeGate, the same gate
 the see-through practice helpers use): xt.entities lists players and
 projectiles online only while they are on screen and not behind a wall, so a
-mod cannot show anyone the player could not see. Offline against bots it
-lists everything (a radar, ESP-style training).
+mod cannot show anyone the player could not see. Offline against bots with the ESP switch on
+it lists everything (a radar, ESP-style training); with the switch off it is
+as limited as online.
 */
 
 #include "quakedef.h"
@@ -30,6 +31,7 @@ lists everything (a radar, ESP-style training).
 #include "touch_lua.h"
 #include "touch_lua_int.h"
 #include "touch_lua_api_gen.h"
+#include "touch_tactics.h"
 
 extern cvar_t v_flipped;
 
@@ -951,6 +953,13 @@ static int tlua_server_players(lua_State *L, const vec3_t eye, int n)
 	return n;
 }
 
+// xt.entities may list what the player cannot see only offline AND with the
+// player's ESP switch on: the same two gates the see-through helpers use.
+static qbool tlua_entities_sees_all(void)
+{
+	return TLua_Offline(NULL) && TouchTactics_EspOn();
+}
+
 int TLuaAPI_cl_entities(lua_State *L)
 {
 	prvm_prog_t *prog = CLVM_prog;
@@ -960,7 +969,7 @@ int TLuaAPI_cl_entities(lua_State *L)
 	static int fn_proj, fn_item;
 	static unsigned seenprog;
 	int i, n = 0;
-	qbool offline = TLua_Offline(NULL);
+	qbool offline = tlua_entities_sees_all();
 	vec3_t eye;
 	lua_newtable(L);
 	if (TLua_CL_CsqcKind() != 2)

@@ -217,9 +217,8 @@ static inline int TouchMode_Controls(int mode, int flags)
 		break;
 	case TOUCHMODE_INTERMISSION:
 	case TOUCHMODE_MAPVOTE:
-		// The scoreboard and the vote own the screen: MENU only (and the
-		// console button, touch_shellbtn.c, which is not part of the HUD).
-		return TOUCHCTL_MENU;
+		// The fitted bar remains available above the match-end panels.
+		return TOUCHCTL_MENU | TOUCHCTL_CHAT | TOUCHCTL_SCORE;
 	default:
 		return 0;
 	}

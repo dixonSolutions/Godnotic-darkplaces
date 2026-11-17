@@ -26,6 +26,7 @@ applies to both.
 #include "touch_spectate.h"
 #include "touch_hudmode.h"
 #include "touch_topbar.h"
+#include "touch_cursor.h"
 #include "touch_feel.h"
 
 extern cvar_t vid_touchscreen;
@@ -772,7 +773,7 @@ static void topbar_sync(void)
 		Con_Printf("Touch HUD: the saved top bar had overlapping buttons, using the automatic row\n");
 		Cvar_SetValueQuick(&touch_topbar_auto, 1);
 	}
-	if (!touch_topbar_auto.integer || !(vid_touchscreen.integer || vid_touchscreen_detected.integer) || cls.state != ca_connected || W < 16 || H < 16)
+	if ((!touch_topbar_auto.integer && !TouchMode_IsMatchEnd(TouchHudMode_Current()->mode)) || !(vid_touchscreen.integer || vid_touchscreen_detected.integer) || cls.state != ca_connected || W < 16 || H < 16)
 	{
 		layout_cvar("_touch_topbar_active", 0);
 		return;
@@ -844,7 +845,7 @@ static void topbar_sync(void)
 qbool TouchHUD_TopBarRect(int slot, float *x, float *y, float *w, float *h)
 {
 	const touchbar_rect_t *r = slot == 0 ? &topbar.console : &topbar.chip;
-	if (!topbar_valid || r->w <= 0 || !in_play() || TouchMode_IsMatchEnd(TouchHudMode_Current()->mode))
+	if (!topbar_valid || r->w <= 0 || !in_play())
 		return false;
 	*x = r->x; *y = r->y; *w = r->w; *h = r->h;
 	return true;
@@ -904,7 +905,7 @@ qbool TouchHUD_Active(void)
 		return false;
 	// The CSQC's pointer UI takes the fingers (TouchHUD_CursorFrame), as the
 	// port's own HUD steps aside for it.
-	// Match end (scoreboard, next-map vote): no controls, only MENU (draw_endmenu).
+	// Match end (scoreboard, next-map vote): draw_endmenu owns the top bar.
 	return in_play() && !cl.csqc_wantsmousemove && !TouchMode_IsMatchEnd(TouchHudMode_Current()->mode);
 }
 
@@ -3043,62 +3044,44 @@ qbool TouchHUD_JoinMouse(qbool down, int button, qbool synthetic, float wx, floa
 }
 
 // ---------------------------------------------------------------------------
-// Match end (scoreboard, next-map vote): no controls but MENU, in the top-
-// left corner (top-right left-handed: the console button keeps the right).
-// Its finger is taken before the finger table and the CSQC pointer, so the
-// vote cards under the rest of the screen stay the game's own.
+// Match end: the fitted bar takes its fingers before the finger table and
+// CSQC pointer, leaving vote cards to the game.
 // ---------------------------------------------------------------------------
-static struct { int id; float x0, y0; qbool drawn; float cx, cy, hx, hy; } endmenu;
+static struct { int id, role; qbool drawn; float cx, cy, hx, hy; } endmenu;
+static qbool end_scores;
 
 static qbool endmenu_shown(void)
 {
 	return TouchMode_IsMatchEnd(hud_mode()) && in_play() && touch_device()
-		&& (vid_touchscreen.integer || cv("touch_desk_pills", 1)) && cv("touch_pause_visible", 1);
+		&& (vid_touchscreen.integer || cv("touch_desk_pills", 1));
 }
 
 static void endmenu_place(void)
 {
-	float u = dp_units();
-	float in_l = 0, in_t = 0, in_r = 0, in_b = 0, dens = 0;
-	float px2con = vid.mode.width > 0 ? ui_w() / (float)vid.mode.width : 1.0f;
-	const char *insets = Cvar_VariableString(&cvars_all, "_touch_safe_insets", ~0);
-	if (insets && insets[0])
-		sscanf(insets, "%f %f %f %f %f", &in_l, &in_t, &in_r, &in_b, &dens);
-	endmenu.hy = TOUCHDP_PILL_HEIGHT * 0.5f * u;
-	endmenu.hx = endmenu.hy * 2.4f;
-	endmenu.cy = in_t * px2con + 8 * u + endmenu.hy + (TOUCHDP_MIN_TARGET * 0.5f * u - endmenu.hy);
-	if (cv("touch_handedness", 0))
-		endmenu.cx = ui_w() - in_r * px2con - 8 * u - endmenu.hx - (48 + 16) * u;
-	else
-		endmenu.cx = in_l * px2con + 8 * u + endmenu.hx;
-}
-
-static qbool endmenu_hit(float px, float py)
-{
-	float grow = TOUCHDP_MIN_TARGET * 0.5f * dp_units();
-	return fabs(px - endmenu.cx) <= endmenu.hx + grow * 0.2f && fabs(py - endmenu.cy) <= max(endmenu.hy, grow) + grow * 0.2f;
-}
-
-static void open_menu(void)
-{
-	TouchHUD_ReleaseAll();
-	if (Cvar_VariableValue(&cvars_all, "menu_gamemenu", ~0) && !cls.demoplayback
-		&& Cvar_VariableValue(&cvars_all, "_menu_gamemenu_dialog_available", ~0))
-		Cbuf_AddText(cmd_local, "\nmenu_showgamemenudialog\n");
-	else
-		Cbuf_AddText(cmd_local, "\ntogglemenu 1\n");
+	endmenu.cx = topbar.menu.x + topbar.menu.w * 0.5f;
+	endmenu.cy = topbar.menu.y + topbar.menu.h * 0.5f;
+	endmenu.hx = topbar.menu.w * 0.5f;
+	endmenu.hy = topbar.menu.h * 0.5f;
 }
 
 static void draw_endmenu(void)
 {
 	float a = bound(0.3f, cv("touch_opacity", 0.90f), 1.0f);
 	endmenu.drawn = false;
-	if (!endmenu_shown())
+	if (!endmenu_shown() || !topbar_valid)
+	{
+		if (end_scores) { Cbuf_AddText(cmd_local, "-showscores\n"); end_scores = false; }
 		return;
+	}
 	shapes_probe();
 	endmenu_place();
 	endmenu.drawn = true;
-	widget_chrome_pill(endmenu.cx, endmenu.cy, endmenu.hx, endmenu.hy, "MENU", endmenu.id != 0, a, C_ACCENT);
+	if (cv("touch_pause_visible", 1))
+		draw_pill("touch_pause_x", 0.655f, "touch_pause_y", 0.088f, "touch_pause_size", 0.060f, "touch_pause_aspect", 2.4f, "MENU", endmenu.id && endmenu.role == ROLE_PAUSE, a);
+	if (cv("touch_scores_visible", 1))
+		draw_pill("touch_scores_x", 0.772f, "touch_scores_y", 0.088f, "touch_scores_size", 0.060f, "touch_scores_aspect", 2.4f, "SCORE", end_scores || (endmenu.id && endmenu.role == ROLE_SCORES), a);
+	if (cv("touch_chat_visible", 1))
+		draw_pill("touch_chat_x", 0.889f, "touch_chat_y", 0.088f, "touch_chat_size", 0.060f, "touch_chat_aspect", 2.4f, "CHAT", endmenu.id && endmenu.role == ROLE_CHAT, a);
 }
 
 static qbool endmenu_finger(int type, int id, float nx, float ny)
@@ -3106,20 +3089,37 @@ static qbool endmenu_finger(int type, int id, float nx, float ny)
 	float px = nx * ui_w(), py = ny * ui_h();
 	if (type == 0)
 	{
-		if (endmenu.id || !endmenu.drawn || !endmenu_shown() || !endmenu_hit(px, py))
+		int role;
+		if (endmenu.id || !endmenu.drawn || !endmenu_shown())
+			return false;
+		role = pill_at(px, py);
+		if (role != ROLE_PAUSE && role != ROLE_CHAT && role != ROLE_SCORES)
 			return false;
 		endmenu.id = id;
-		endmenu.x0 = px;
-		endmenu.y0 = py;
+		endmenu.role = role;
 		return true;
 	}
-	if (id != endmenu.id)
+	if (id != endmenu.id || !id)
 		return false;
 	if (type == 2)
 	{
+		int role = endmenu.role;
 		endmenu.id = 0;
-		if (endmenu_hit(px, py))
-			open_menu();
+		if (endmenu_shown() && pill_at(px, py) == role)
+		{
+			if (role == ROLE_SCORES)
+			{
+				end_scores = !end_scores;
+				Cbuf_AddText(cmd_local, end_scores ? "+showscores\n" : "-showscores\n");
+			}
+			else
+			{
+				finger_t f;
+				memset(&f, 0, sizeof(f));
+				f.role = role;
+				pill_release(&f);
+			}
+		}
 	}
 	return true;
 }
@@ -3599,4 +3599,12 @@ int TouchHUD_HeldClip(void)
 int TouchHUD_AltFireState(void)
 {
 	return altfire_state();
+}
+
+// Stock Xonotic CSQC (including a server-provided one) draws these skin
+// pictures as its pointer. SDL supplies the pointer on this platform.
+qbool TouchHUD_HideCursorPic(const char *picname)
+{
+	return TouchCursor_HidePic(picname, vid_touchscreen.integer, vid_pointer_mouse.integer,
+		Cvar_VariableValue(&cvars_all, "vid_system_cursor", ~0) != 0);
 }

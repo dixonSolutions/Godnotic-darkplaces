@@ -1783,6 +1783,7 @@ void Sbar_Draw (void)
 		DrawQ_Pic((vid_conwidth.integer - Draw_GetPicWidth(pic) * crosshair_size.value) * 0.5f, (vid_conheight.integer - Draw_GetPicHeight(pic) * crosshair_size.value) * 0.5f, pic, Draw_GetPicWidth(pic) * crosshair_size.value, Draw_GetPicHeight(pic) * crosshair_size.value, crosshair_color_red.value, crosshair_color_green.value, crosshair_color_blue.value, crosshair_color_alpha.value, 0);
 	}
 
+	if (!(vid_touchscreen.integer && !vid_pointer_mouse.integer) && !Cvar_VariableValue(&cvars_all, "vid_system_cursor", ~0)) // Touch: SDL owns the mouse pointer
 	if (cl_prydoncursor.integer > 0)
 		DrawQ_Pic((cl.cmd.cursor_screen[0] + 1) * 0.5 * vid_conwidth.integer, (cl.cmd.cursor_screen[1] + 1) * 0.5 * vid_conheight.integer, Draw_CachePic (va(vabuf, sizeof(vabuf), "gfx/prydoncursor%03i", cl_prydoncursor.integer)), 0, 0, 1, 1, 1, 1, 0);
 }
