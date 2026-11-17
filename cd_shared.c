@@ -98,6 +98,11 @@ static int faketrack = -1;
 static qbool cdPlaying = false;
 static qbool cdPlayLooping = false;
 static unsigned char cdPlayTrack;
+// the track that was asked for ("rising-of-the-phoenix" or a path), so the
+// music lifecycle can tell the menu theme from a map's or a server's track
+static char cdplayingname[MAX_QPATH];
+// a track that takes over the stream fades in instead of starting mid-note
+static double music_fade_start, music_fade_len;
 
 static void CDAudio_Eject (void)
 {
@@ -203,6 +208,7 @@ static void CDAudio_Play_byName (const char *trackname, qbool looping, qbool try
 	cdPlayLooping = looping;
 	cdPlayTrack = track;
 	cdPlaying = true;
+	dp_strlcpy(cdplayingname, trackname, sizeof(cdplayingname));
 
 	if (cdvolume == 0.0 || bgmvolume.value == 0)
 		CDAudio_Pause ();
@@ -224,6 +230,41 @@ float CDAudio_GetPosition (void)
 	return -1;
 }
 
+// Touch: the music lifecycle asks these instead of keeping a flag of its own.
+qbool CDAudio_IsPlaying(void)
+{
+	return enabled && cdPlaying && faketrack != -1 && S_GetChannelPosition(faketrack) >= 0;
+}
+
+const char *CDAudio_CurrentTrack(void)
+{
+	return cdplayingname;
+}
+
+// Fade the current track in from near silence: a map's track that replaced the
+// menu theme at the end of a join is heard to take over.
+void CDAudio_FadeIn(double seconds)
+{
+	music_fade_start = Sys_DirtyTime();
+	music_fade_len = seconds;
+}
+
+static float CDAudio_FadeLevel(void)
+{
+	double t;
+	if (music_fade_len <= 0)
+		return 1.0f;
+	t = (Sys_DirtyTime() - music_fade_start) / music_fade_len;
+	if (t >= 1.0)
+	{
+		music_fade_len = 0;
+		return 1.0f;
+	}
+	if (t < 0)
+		t = 0;
+	return (float)(0.15 + 0.85 * t); // never zero: a zero volume pauses the stream
+}
+
 static void CDAudio_StopPlaylistTrack(void);
 
 void CDAudio_Stop (void)
@@ -231,6 +272,7 @@ void CDAudio_Stop (void)
 	if (!enabled)
 		return;
 
+	cdplayingname[0] = 0; // Touch: nothing is playing once this returns
 	// save the playlist position
 	CDAudio_StopPlaylistTrack();
 
@@ -526,7 +568,7 @@ void CDAudio_Update (void)
 		return;
 
 	{ extern void TouchMusic_Update(void); TouchMusic_Update(); } // Touch: menu music lifecycle
-	CDAudio_SetVolume (bgmvolume.value);
+	CDAudio_SetVolume (bgmvolume.value * CDAudio_FadeLevel()); // Touch: fade a track in
 	if (music_playlist_playing > 0 && CDAudio_GetPosition() < 0)
 	{
 		// this track ended, start a new track from the beginning

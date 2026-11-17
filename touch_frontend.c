@@ -1556,9 +1556,12 @@ void TouchFE_Loading(const char *msg, float fraction)
 		TouchHUD_LoadingBack(); // the abort point right after this stops the load
 }
 
+static cvar_t touch_music_in_game = {CF_CLIENT, "touch_music_in_game", "0", "keep the menu theme playing in a match whose map brings no music of its own (Godnotic)"};
+
 void TouchFE_Init(void)
 {
 	Cvar_RegisterVariable(&touch_native_frontend);
+	Cvar_RegisterVariable(&touch_music_in_game);
 	Cvar_RegisterVariable(&fe_echo);
 	Cvar_RegisterVariable(&fe_state);
 	Cvar_RegisterCallback(&touch_native_frontend, fe_switch_changed);
@@ -1582,11 +1585,24 @@ void TouchMusic_Update(void)
     static double next_rescan;
     static qbool asked_before;
     static qbool said_retry;
-    qbool in_game = cls.connect_trying || cls.state == ca_connected;
-    qbool playing = CDAudio_GetPosition() >= 0;
+    static qbool said_handover;
+    int stage;
+    qbool playing = CDAudio_IsPlaying();
+    const char *track = CDAudio_CurrentTrack();
+    qbool theme_playing = playing && TouchMusic_IsTheme(track);
+    // a map's cdtrack, a server's cd loop or a playlist: music that is not the theme
+    qbool map_music = (playing && !theme_playing) || music_playlist_active >= 0;
     qbool present = false;
     int action;
-    if (!in_game && !playing && host.realtime >= next_check)
+    // connecting, downloading, loading and the join preview are not a match:
+    // the theme keeps playing through all of them, until the map brings music
+    if (cls.state == ca_connected && cls.signon == SIGNONS)
+        stage = TM_STAGE_GAME;
+    else if (cls.connect_trying || cls.state != ca_disconnected)
+        stage = TM_STAGE_JOINING;
+    else
+        stage = TM_STAGE_MENU;
+    if (stage != TM_STAGE_GAME && !theme_playing && bgmvolume.value > 0 && host.realtime >= next_check)
     {
         next_check = TouchMusic_NextCheck(host.realtime, 0);
         // a theme pk3dir the launcher wrote, or a pk3 the app renamed into
@@ -1603,7 +1619,7 @@ void TouchMusic_Update(void)
             Cbuf_AddText(cmd_local, "\nfs_rescan\n");
         }
     }
-    action = TouchMusic_Policy(in_game, present, playing);
+    action = TouchMusic_JoinPolicy(stage, present, theme_playing, map_music, touch_music_in_game.integer);
     if (action > 0)
     {
         // fs_rescan the first time only: it reopens every pack, and a retry has
@@ -1623,13 +1639,22 @@ void TouchMusic_Update(void)
             Cbuf_AddText(cmd_local, "\nmusic_playlist_index -1; menu_cdtrack rising-of-the-phoenix; fs_rescan; cd loop rising-of-the-phoenix\n");
             Con_Printf("MUSIC: start menu theme\n");
         }
+        CDAudio_FadeIn(0.6); // Touch: a theme that starts swells in
         next_check = TouchMusic_NextCheck(host.realtime, 1);
     }
-    else if (action < 0)
+    else if (action < 0 && theme_playing)
     {
         asked_before = false;
         said_retry = false;
+        said_handover = false;
         Cbuf_AddText(cmd_local, "\ncd stop\n");
         Con_Printf("MUSIC: stop menu theme for match\n");
+    }
+    else if (action < 0 && !said_handover)
+    {
+        // the map's track replaced the stream and the mixer fades it in: say so
+        // once, and never send "cd stop" over a track the map owns
+        said_handover = true;
+        Con_Printf("MUSIC: the map's own track takes over\n");
     }
 }

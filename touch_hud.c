@@ -2785,6 +2785,10 @@ static qbool reduce_motion(void) { return cv("touch_reduce_motion", 0) != 0; }
 
 static qbool spec_hud(void)
 {
+	// Before the join choice the observer HUD is not the player's screen: the
+	// join dialog comes first, over the preview or as soon as observing starts.
+	if (TouchHudMode_JoinWaiting())
+		return false;
 	return TouchHUD_Active() && TouchUI_SpectatorState() != TOUCHSPEC_NONE;
 }
 
@@ -2804,35 +2808,19 @@ static void spec_release(void)
 // thumb (mirrored left-handed). Secondary size, a 48 dp row.
 static void spec_bar_part(int part, float *cx, float *cy, float *hx, float *hy)
 {
-	float u = dp_units(), bx, by, w;
+	float u = dp_units(), bx, by, base;
+	touchspec_bar_rect_t r[TOUCHSPEC_BAR_PARTS];
 	widget_center(cv("touch_specbar_x", 0.815f), cv("touch_specbar_y", 0.885f), &bx, &by);
-	*hy = max(TOUCHDP_SECONDARY * 0.5f * u, screen_min() * cv("touch_specbar_size", 0.085f) * 0.5f * widget_scale());
-	w = *hy * 2;   // the arrows are square
-	if (part == TOUCHSPEC_BAR_MAIN)
+	base = max(TOUCHDP_SECONDARY * 0.5f * u, screen_min() * cv("touch_specbar_size", 0.085f) * 0.5f * widget_scale());
+	TouchSpec_BarLayout(ui_w(), ui_h(), bx, by, base, u, spec_join_shown(), r);
+	if (part == TOUCHSPEC_BAR_JOIN && !spec_join_shown())
 	{
-		*hx = *hy * 2.2f;
-		*cx = bx;
+		*cx = *cy = -1000;
+		*hx = *hy = 0;
+		return;
 	}
-	else if (part == TOUCHSPEC_BAR_JOIN)
-	{
-		if (!spec_join_shown())
-		{
-			// not offered: off screen, so it is not drawn or hit
-			*cx = *cy = -1000;
-			*hx = *hy = 0;
-			return;
-		}
-		*hx = *hy * 1.15f;
-		*cx = bx + (*hy * 2.2f + *hy * 0.25f + *hy) + (*hy * 0.25f + *hx);
-	}
-	else
-	{
-		*hx = w * 0.5f;
-		*cx = bx + (part == TOUCHSPEC_BAR_PREV ? -1 : 1) * (*hy * 2.2f + *hy * 0.25f + *hx);
-	}
-	*cy = by;
+	*cx = r[part].cx; *cy = r[part].cy; *hx = r[part].hx; *hy = r[part].hy;
 }
-
 // The fly rocker: UP over DOWN, beside the stick on its inner side.
 static void spec_fly_part(qbool up, float *cx, float *cy, float *r)
 {

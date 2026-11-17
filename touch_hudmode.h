@@ -405,7 +405,7 @@ static inline int TouchJoinDlg_Frame(touchjoindlg_t *d, int mode, int flags, int
 			return TOUCHJOINDLG_NOTHING;
 		if (!d->since)
 			d->since = now;
-		if (now - d->since < TOUCHJOINDLG_SETTLE || now < d->next || !screen_free)
+		if (now < d->next || !screen_free)
 			return TOUCHJOINDLG_NOTHING;
 		if (autojoin && d->tries > 0)
 		{
@@ -532,5 +532,7 @@ static inline int TouchMode_MenuHidesHud(int menu_open)
 {
 	return menu_open ? 1 : 0;
 }
+
+int TouchHudMode_JoinWaiting(void);
 
 #endif

@@ -261,4 +261,55 @@ static inline int TouchSpec_JoinFrame(touchspec_join_t *j, int state, double now
 	return now - j->sent_time < TOUCHSPEC_JOIN_PRESS;
 }
 
+
+// The bar's geometry, pure and shared: all four parts (previous, main, next,
+// JOIN) in one row. The row is laid out around the wanted centre but is moved
+// and shrunk uniformly until it fits the screen's safe width and height, so
+// JOIN can never be pushed off the right edge. Widths are in units of the
+// half-height: 2 + 4.4 + 2 + 2.3 and three 0.25 gaps = 11.45.
+#define TOUCHSPEC_BAR_GAP     0.25f
+#define TOUCHSPEC_BAR_TOTAL  11.45f
+#define TOUCHSPEC_BAR_TOTAL_NOJOIN 9.15f
+#define TOUCHSPEC_BAR_MARGIN_DP 8.0f
+typedef struct touchspec_bar_rect_s { float cx, cy, hx, hy; } touchspec_bar_rect_t;
+
+static inline void TouchSpec_BarLayout(float w, float h, float want_x, float want_y, float hy, float u, int join, touchspec_bar_rect_t out[TOUCHSPEC_BAR_PARTS])
+{
+	float margin = TOUCHSPEC_BAR_MARGIN_DP * u, total, scale = 1.0f, left, cy, x, gap;
+	int part;
+	for (part = 0; part < TOUCHSPEC_BAR_PARTS; part++)
+		out[part].cx = out[part].cy = out[part].hx = out[part].hy = 0;
+	if (w <= 0 || h <= 0 || hy <= 0)
+		return;
+	if (margin * 2 >= w) margin = 0;
+	if (margin * 2 >= h) margin = 0;
+	total = join ? TOUCHSPEC_BAR_TOTAL : TOUCHSPEC_BAR_TOTAL_NOJOIN;
+	if (2 * hy > h - 2 * margin)
+		scale = (h - 2 * margin) / (2 * hy);
+	if (total * hy * scale > w - 2 * margin)
+		scale = (w - 2 * margin) / (total * hy);
+	hy *= scale;
+	if (hy <= 0)
+		return;
+	total *= hy;
+	left = want_x - total * 0.5f;
+	if (left < margin) left = margin;
+	if (left + total > w - margin) left = w - margin - total;
+	if (left < 0) left = 0;
+	cy = want_y;
+	if (cy - hy < margin) cy = margin + hy;
+	if (cy + hy > h - margin) cy = h - margin - hy;
+	gap = TOUCHSPEC_BAR_GAP * hy;
+	x = left;
+	out[TOUCHSPEC_BAR_PREV].cx = x + hy; out[TOUCHSPEC_BAR_PREV].hx = hy; x += 2 * hy + gap;
+	out[TOUCHSPEC_BAR_MAIN].cx = x + 2.2f * hy; out[TOUCHSPEC_BAR_MAIN].hx = 2.2f * hy; x += 4.4f * hy + gap;
+	out[TOUCHSPEC_BAR_NEXT].cx = x + hy; out[TOUCHSPEC_BAR_NEXT].hx = hy; x += 2 * hy + gap;
+	if (join) { out[TOUCHSPEC_BAR_JOIN].cx = x + 1.15f * hy; out[TOUCHSPEC_BAR_JOIN].hx = 1.15f * hy; }
+	for (part = 0; part < TOUCHSPEC_BAR_PARTS; part++)
+	{
+		out[part].cy = cy;
+		out[part].hy = hy;
+	}
+}
+
 #endif

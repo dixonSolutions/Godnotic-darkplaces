@@ -39,6 +39,7 @@ static cvar_t touch_preload_seed_budget = {CF_CLIENT, "touch_preload_seed_budget
 static cvar_t touch_preload_frame_budget = {CF_CLIENT, "touch_preload_frame_budget", "8", "milliseconds per frame for deferred seed work while a menu is open (one asset may exceed the budget)"};
 static cvar_t touch_preload_keep = {CF_CLIENT, "touch_preload_keep", "4", "an entry of a map's preload list is dropped once that many games on the map did not need it"};
 static cvar_t touch_preload_seed = {CF_CLIENT, "touch_preload_seed", "1", "with no preload list for a map yet, preload the built-in list of player models, weapons and shaders a game always needs"};
+static cvar_t touch_preload_defer_seed = {CF_CLIENT, "touch_preload_defer_seed", "1", "a map's first game loads the built-in seed's models in the menu frames after the first game frame, not under the loading screen: they are speculation, and mod_lazyload loads one at first use if the menu never opens (Godnotic); 0 = under the loading screen"};
 
 #define TP_MAX 1024
 #define TP_NAMELEN MAX_QPATH
@@ -328,17 +329,25 @@ static qbool TP_Load(tp_entry_t *e)
 
 // Replay a map list, or its seed on a first visit. When opted in, queue
 // speculative remote models and work over budget in model/picture/shader/sound order.
+//
+// The seed is the engine's own guess (bot models, common weapons) for a map
+// nothing has been recorded on yet: on stormkeep its 68 models cost ~1.4 s of a
+// ~2.2 s first load. Deferring them costs nothing the first frame needs (the
+// world's own models and textures are loaded by the world model) and they load
+// in the menu frames after it, or at first use - the same path a model
+// touch_preload never heard of takes.
 static void TP_Replay(void)
 {
 	double start = Sys_DirtyTime(), budget, t0;
 	double spent[4] = {0, 0, 0, 0};
 	int n[4] = {0, 0, 0, 0}, pass, i, skipped = 0;
-	qbool have, seed, defer;
+	qbool have, seed, defer, deferseed;
 	if (!touch_preload.integer || !cl.worldbasename[0])
 		return;
 	have = TP_Open(cl.worldbasename);
 	seed = !have && touch_preload_seed.integer;
 	defer = touch_preload_defer.integer && (seed || !sv.active);
+	deferseed = seed && !defer && touch_preload_defer_seed.integer;
 	if (seed)
 	{
 		for (i = 0; tp_seed[i]; i++)
@@ -349,7 +358,7 @@ static void TP_Replay(void)
 		}
 	}
 	budget = (seed ? min(touch_preload_budget.value, defer && !sv.active ? 0 : touch_preload_seed_budget.value) : touch_preload_budget.value) * 0.001;
-	if (defer)
+	if (defer || deferseed)
 		tp.pending_world = cl.worldmodel;
 	tp.replaying = true;
 	for (pass = 0; pass < 4; pass++)
@@ -358,9 +367,9 @@ static void TP_Replay(void)
 			tp_entry_t *e = &tp.list[i];
 			if (TP_KindOrder(e->kind) != pass)
 				continue;
-			if ((defer && !sv.active && e->kind == 'm') || ((!seed || defer) && Sys_DirtyTime() - start >= budget))
+			if ((deferseed && e->kind == 'm') || (defer && !sv.active && e->kind == 'm') || ((!seed || defer || deferseed) && Sys_DirtyTime() - start >= budget))
 			{
-				if (defer) { e->pending = true; tp.pending++; }
+				if (defer || deferseed) { e->pending = true; tp.pending++; }
 				skipped++;
 				continue;
 			}
@@ -382,7 +391,7 @@ static void TP_Replay(void)
 // current. Recheck before every load: a load may itself change client state.
 static qbool TP_DeferredSafe(void)
 {
-	return touch_preload.integer && touch_preload_defer.integer && tp.pending_world
+	return touch_preload.integer && (touch_preload_defer.integer || touch_preload_defer_seed.integer) && tp.pending_world
 		&& cl.worldmodel == tp.pending_world && r_main_mempool && !vid_hidden
 		&& vid.mode.width > 0 && vid.mode.height > 0
 		&& cls.state == ca_connected && cls.signon == SIGNONS
@@ -486,4 +495,5 @@ static void TP_Init(void)
 	Cvar_RegisterVariable(&touch_preload_frame_budget);
 	Cvar_RegisterVariable(&touch_preload_keep);
 	Cvar_RegisterVariable(&touch_preload_seed);
+	Cvar_RegisterVariable(&touch_preload_defer_seed);
 }

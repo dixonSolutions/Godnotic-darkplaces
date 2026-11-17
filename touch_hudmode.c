@@ -53,6 +53,8 @@ static double pending_join_at;
 
 static cvar_t pub_menu_paused = {CF_CLIENT | CF_READONLY, "_touch_menu_paused", "0", "the local server is actually paused; read-only"};
 static cvar_t pub_join_preview = {CF_CLIENT | CF_READONLY, "_touch_join_preview", "0", "the map is drawable while a join finishes (touch_joinpreview.c); read-only"};
+static cvar_t pub_join_waiting = {CF_CLIENT | CF_READONLY, "_touch_join_waiting", "0", "the join choice is owed, so the observer HUD waits for it; read-only"};
+static qbool join_waiting;   // the player still has to choose Join or Spectate
 static cvar_t pub_menu_scrim = {CF_CLIENT | CF_READONLY, "_touch_menu_scrim", "0", "how dark the menu overlay dims the live game, percent (0: menu closed); read-only"};
 static cvar_t pub_mode = {CF_CLIENT | CF_READONLY, "_touch_hud_mode", "off", "the in-match HUD mode (touch_hudmode.c); read-only"};
 static cvar_t pub_target = {CF_CLIENT | CF_READONLY, "_touch_hud_target", "", "the followed player's name while following; read-only"};
@@ -191,6 +193,7 @@ static void publish(void)
 	}
 	set_number(&pub_menu_paused, TouchMode_MenuPaused(sv.active, host.paused, sv.paused));
 	set_number(&pub_join_preview, TouchJoinPreview_Active());
+	set_number(&pub_join_waiting, join_waiting ? 1 : 0);
 	set_number(&pub_menu_scrim, TouchMode_MenuScrim(TouchMode_MenuOverlay(key_dest != key_game), TouchMode_MenuPaused(sv.active, host.paused, sv.paused)));
 	set_string(&pub_mode, TouchMode_Name(current.mode));
 	set_string(&pub_target, current_target);
@@ -236,6 +239,7 @@ static void join_choice(const char *text)
 		return;
 	TouchJoinDlg_Answered(&join_dlg);
 	join_dialog_scheduled = false;
+	join_waiting = false;
 	local_join.remaining = 0;
 	if (current.mode == TOUCHMODE_OFF)
 	{
@@ -326,6 +330,10 @@ void TouchHudMode_Update(void)
 	// the join dialog also comes up over the join preview, before the player is
 	// made an observer: TouchJoinDlg_Frame's joining flag
 	qbool joining = TouchJoinPreview_Active() && cls.state == ca_connected;
+	// Owed already, before the settle or the menu: the observer HUD must not
+	// appear first, so hide it from the first frame the question is owed.
+	if (join_dlg.owed && (joining || TouchMode_IsSpectating(current.mode)))
+		join_waiting = true;
 	switch (TouchJoinDlg_Frame(&join_dlg, current.mode, current.flags,
 		sv.active && touch_local_autojoin.integer, Cvar_VariableValue(&cvars_all, "g_campaign", ~0) == 0 ? 0 :
 		(Cvar_VariableValue(&cvars_all, "g_campaign_forceteam", ~0) >= 1 && Cvar_VariableValue(&cvars_all, "g_campaign_forceteam", ~0) <= 4 ? 2 : 1),
@@ -333,6 +341,7 @@ void TouchHudMode_Update(void)
 	{
 	case TOUCHJOINDLG_OPEN:
 		Con_DPrintf("Touch HUD: observer at match start: the join dialog\n");
+		join_waiting = true;
 		join_dialog_scheduled = true;
 		Cbuf_AddText(cmd_local, "touch_join_dialog auto\n");
 		break;
@@ -343,6 +352,13 @@ void TouchHudMode_Update(void)
 	default:
 		break;
 	}
+	if (current.mode == TOUCHMODE_PLAYING || TouchMode_IsOutOfRound(current.mode) || TouchMode_IsMatchEnd(current.mode))
+		join_waiting = false;
+	// The stock dialog can be closed with Back (the native one asks us to
+	// cancel): no choice, no scheduled open and no menu means the player
+	// dismissed it, so show the observer HUD again.
+	if (join_waiting && !join_dialog_scheduled && !join_dlg.owed && key_dest == key_game)
+		join_waiting = false;
 	if (current.mode != last_mode)
 		Con_DPrintf("Touch HUD mode: %s -> %s (join %s)\n", TouchMode_Name(last_mode), TouchMode_Name(current.mode), TouchMode_JoinName(current.join));
 	publish();
@@ -356,6 +372,12 @@ const touchmode_t *TouchHudMode_Current(void)
 const char *TouchHudMode_Target(void)
 {
 	return current_target;
+}
+
+// The join choice is still owed: the observer HUD must not show first.
+int TouchHudMode_JoinWaiting(void)
+{
+	return join_waiting;
 }
 
 // touch_join_dialog: Xonotic's join dialog. "directmenu TeamSelect" is what
@@ -412,6 +434,7 @@ static void TouchJoin_f(cmd_state_t *cmd)
 		// already watching: nothing to send, the dialog just closes
 		TouchJoinDlg_Answered(&join_dlg);
 		join_dialog_scheduled = false;
+		join_waiting = false;
 		Cbuf_AddText(cmd_local, "togglemenu 0\n");
 		return;
 	}
@@ -424,7 +447,20 @@ void TouchHudMode_Reset(void)
 	memset(&join_req, 0, sizeof(join_req));
 	memset(&local_join, 0, sizeof(local_join));
 	join_dialog_scheduled = false;
+	join_waiting = false;
 	pending_join[0] = 0;
+}
+
+// touch_join_cancel: the dialog was dismissed without a choice. The question
+// is answered for this match (MENU > Join game still opens it) and the
+// observer HUD is not hidden any more.
+static void TouchJoinCancel_f(cmd_state_t *cmd)
+{
+	(void)cmd;
+	TouchJoinDlg_Answered(&join_dlg);
+	join_dialog_scheduled = false;
+	join_waiting = false;
+	Cbuf_AddText(cmd_local, "togglemenu 0\n");
 }
 
 static void TouchAction_f(cmd_state_t *cmd)
@@ -504,6 +540,7 @@ void TouchHudMode_Init(void)
 	int act;
 	Cvar_RegisterVariable(&pub_menu_paused);
 	Cvar_RegisterVariable(&pub_join_preview);
+	Cvar_RegisterVariable(&pub_join_waiting);
 	Cvar_RegisterVariable(&pub_menu_scrim);
 	Cvar_RegisterVariable(&pub_mode);
 	Cvar_RegisterVariable(&pub_target);
@@ -523,5 +560,6 @@ void TouchHudMode_Init(void)
 	Cmd_AddCommand(CF_CLIENT, "touch_join_dialog", TouchJoinDialog_f, "open Xonotic's join dialog: auto-select, the teams the server offers, spectate");
 	Cmd_AddCommand(CF_CLIENT, "touch_join_answered", TouchJoinAnswered_f, "the game's own Welcome dialog (Join! / Spectate) was shown: the join dialog is not owed for this match");
 	Cmd_AddCommand(CF_CLIENT, "touch_join", TouchJoin_f, "what the join dialog's rows run: touch_join <auto|red|blue|yellow|pink|spectate>");
+	Cmd_AddCommand(CF_CLIENT, "touch_join_cancel", TouchJoinCancel_f, "the join dialog was dismissed without a choice: stop waiting for it and show the observer HUD");
 	Cmd_AddCommand(CF_CLIENT, "touch_action", TouchAction_f, "run an in-match menu action: resume, join, spectate, follow, next, prev, free, team, settings, leave [confirm] (_touch_hud_actions lists them)");
 }

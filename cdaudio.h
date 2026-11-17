@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "cvar.h"
 
 extern cvar_t cdaudioinitialized;
+extern int music_playlist_active;
 
 int CDAudio_Init(void);
 void CDAudio_Play(int track, qbool looping);
@@ -32,3 +33,7 @@ int CDAudio_Startup(void);
 void CDAudio_Shutdown(void);
 void CDAudio_Update(void);
 float CDAudio_GetPosition(void);
+// Touch: the music lifecycle (menu theme, join, map track)
+qbool CDAudio_IsPlaying(void);
+const char *CDAudio_CurrentTrack(void);
+void CDAudio_FadeIn(double seconds);
