@@ -60,6 +60,7 @@ when the player ticks "remember".
 #include "touch_net.h"
 #include "touch_joinfail.h"
 #include "touch_srvlist.h"
+#include "touch_clipboard.h"
 
 #if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
 #define TOUCHLAN_SOCKETS 1
@@ -1221,6 +1222,7 @@ void TouchLAN_Frame(void)
 	static double next_status;
 	TouchJoinFail_Frame();
 	TouchSrvList_Frame();
+	TouchClip_Frame(); // a long press on a console line copies it
 	if (!host_pw_ready)
 	{
 		TouchSrvList_FirstFrame();
@@ -1477,6 +1479,7 @@ void TouchLAN_Init(void)
 	TouchNet_Init(); // joins over real networks: touch_net.c
 	TouchJoinFail_Init(); // a failed join says why: touch_joinfail.c
 	TouchSrvList_Init(); // the fast server list: touch_srvlist.c
+	TouchClip_Init(); // Ctrl+C, Ctrl+V and the Copy/Paste commands: touch_clipboard.c
 	Cvar_RegisterVariable(&sv_touch_lan_password);
 	Cvar_RegisterVariable(&net_slist_lan_only);
 	Cvar_RegisterVariable(&net_slist_lan_ports);

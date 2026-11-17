@@ -2142,6 +2142,65 @@ static void Con_LastVisibleLine(unsigned mask_must, unsigned mask_mustnot, int *
 
 /*
 ================
+Con_LineFromBottom
+
+Touch: the n-th line of the console counted from the newest (0 is the last
+line), colour codes stripped: what a long press on the console copies, and
+what `clip_line` copies (touch_clipboard.c).
+================
+*/
+qbool Con_LineFromBottom(int n, char *out, size_t size)
+{
+	int i, seen = 0;
+	qbool found = false;
+	if (!out || size < 2)
+		return false;
+	out[0] = 0;
+	if (n < 0 || CON_LINES_COUNT <= 0)
+		return false;
+	if (con_mutex) Thread_LockMutex(con_mutex);
+	for (i = CON_LINES_COUNT - 1; i >= 0; --i)
+	{
+		int h = Con_LineHeight(i);
+		if (seen + h > n)
+		{
+			size_t len = CON_LINES(i).len;
+			if (len >= size)
+				len = size - 1;
+			memcpy(out, CON_LINES(i).start, len);
+			out[len] = 0;
+			SanitizeString(out, out); // colour codes out: what the line reads as
+			found = out[0] != 0;
+			break;
+		}
+		seen += h;
+	}
+	if (con_mutex) Thread_UnlockMutex(con_mutex);
+	return found;
+}
+
+/*
+================
+Con_LineAtScreenY
+
+Touch: the console line under a normalized screen y (0 top, 1 bottom), for the
+long press copy. The text is drawn from two text rows above the console's
+bottom edge upwards, one con_textsize per line (touch_clipboard.c).
+================
+*/
+qbool Con_LineAtScreenY(float ny, char *out, size_t size)
+{
+	int n;
+	if (!con_vislines || con_textsize.value <= 0)
+		return false;
+	n = (int)((1.0f - ny) * vid_conheight.value / con_textsize.value) - 2;
+	if (n < 0)
+		n = 0;
+	return Con_LineFromBottom(n, out, size);
+}
+
+/*
+================
 Con_DrawConsole
 
 Draws the console with the solid background

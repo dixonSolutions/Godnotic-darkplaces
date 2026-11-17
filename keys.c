@@ -28,6 +28,7 @@
 #include "touch_vote.h" // Touch
 #include "touch_lua.h" // Touch: Lua mods and plugins
 #include "touch_warm.h" // Touch: menu-idle warm-up
+#include "touch_clipboard.h" // Touch: Ctrl+C copies the line being edited
 
 cvar_t con_closeontoggleconsole = {CF_CLIENT | CF_ARCHIVE, "con_closeontoggleconsole","1", "allows toggleconsole binds to close the console as well; when set to 2, this even works when not at the start of the line in console input; when set to 3, this works even if the toggleconsole key is the color tag"};
 
@@ -806,6 +807,14 @@ int Key_Parse_CommonKeys(cmd_state_t *cmd, qbool is_console, int key, int unicod
 			}
 			Z_Free(cbd);
 		}
+		return linepos;
+	}
+
+	// Touch: Ctrl+C copies the line being edited (the console's or the chat's),
+	// the pair of the Ctrl+V paste above (touch_clipboard.c)
+	if (key == 'c' && KM_CTRL)
+	{
+		TouchClip_Set(line);
 		return linepos;
 	}
 

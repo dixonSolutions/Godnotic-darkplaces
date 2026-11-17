@@ -7,6 +7,7 @@ touch_loadtime 1 prints, at the first frame of the main menu and at the first
 game frame after a load:
 
   LOADTIME menu_ready proc=<ms since process start> init=<ms since Host_Init>
+  LOADTIME menu_presented proc=<ms since process start> (after the video swap)
   LOADTIME game_ready load=<ms since the load began> proc=<ms> frames=<n>
   LOADTIME world_presented load=<ms since the load began>
 
@@ -55,6 +56,7 @@ static cvar_t touch_load_lazydeflate = {CF_SERVER, "touch_load_lazydeflate", "1"
 static cvar_t touch_loadtime_menu = {CF_CLIENT | CF_READONLY, "_touch_loadtime_menu", "0", "1 once the main menu has drawn its first frame (for scripts that wait for it)"};
 static cvar_t touch_loadtime_game = {CF_CLIENT | CF_READONLY, "_touch_loadtime_game", "0", "counts loads that reached their first game frame (for scripts that wait for one)"};
 static qbool tlt_world_drawn;
+static qbool tlt_menu_presented;
 
 void TouchLoadTime_WorldDrawn(int fbo)
 {
@@ -342,6 +344,13 @@ void TouchLoadTime_Frame(void)
 
 void TouchLoadTime_Presented(void)
 {
+	// the menu is interactive only once its first frame has been swapped in
+	if (tlt.menu_reported && !tlt_menu_presented)
+	{
+		tlt_menu_presented = true;
+		if (touch_loadtime.integer)
+			Con_Printf("LOADTIME menu_presented proc=%.1f\n", TLT_ProcessAgeMs());
+	}
 	// a world frame drawn before the signon finished (touch_joinpreview.c):
 	// by then the loading page is a progress bar, not a picture
 	if (!tlt.world_previewed && tlt.load_start > 0 && TouchJoinPreview_Drew())

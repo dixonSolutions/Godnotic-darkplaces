@@ -51,6 +51,7 @@ OBJ_COMMON= \
 	touch_joinfail.o \
 	touch_joinname.o \
 	touch_srvlist.o \
+	touch_clipboard.o \
 	touch_frontend.o \
 	touch_pause.o \
 	touch_datafetch.o \

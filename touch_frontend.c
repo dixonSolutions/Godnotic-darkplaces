@@ -42,6 +42,8 @@ Everything works on the desktop too, without a sink, for headless tests
 #include "touch_frontend.h"
 #include "touch_joinpreview.h" // Touch: the "preview" join stage
 #include "touch_music.h"
+#include "touch_loadfs.h" // Touch: the theme pack may land after start-up
+#include "cdaudio.h"
 #include "touch_hud.h"
 #include "touch_hudmode.h"
 #include "touch_lan.h"
@@ -1565,31 +1567,68 @@ void TouchFE_Init(void)
 	Cmd_AddCommand(CF_CLIENT, "fe_take", TouchFE_Take_f, "print the front-end bridge topics that changed since the last fe_take, and the pending events");
 }
 
-/* Run even when a native frontend hides the QuakeC menu. */
+/* Run even when a native frontend hides the QuakeC menu.
+ *
+ * `playing` is the engine's own state, not a flag of our own: asking for the
+ * track and getting it are two things ("cd loop" fails silently when the pack
+ * is not in the search path yet, or when the track list arrived before the pack
+ * did), and a start that failed used to leave the menu silent for the whole
+ * session. Asking again every half second, then every five, is what makes a
+ * music pack that lands late play.
+ */
 void TouchMusic_Update(void)
 {
-    static qbool playing;
     static double next_check;
+    static double next_rescan;
+    static qbool asked_before;
+    static qbool said_retry;
     qbool in_game = cls.connect_trying || cls.state == ca_connected;
+    qbool playing = CDAudio_GetPosition() >= 0;
     qbool present = false;
     int action;
     if (!in_game && !playing && host.realtime >= next_check)
     {
-        next_check = host.realtime + 0.5;
+        next_check = TouchMusic_NextCheck(host.realtime, 0);
+        // a theme pk3dir the launcher wrote, or a pk3 the app renamed into
+        // place, is in the cached loose-directory listing only after this
+        TouchLoadFS_Changed();
         present = FS_FileExists("touch/music-ready.txt") ||
             FS_FileExists("sound/cdtracks/rising-of-the-phoenix.ogg") ||
             FS_FileExists("sound/cdtracks/rising-of-the-phoenix.opus");
+        if (!present && host.realtime >= next_rescan)
+        {
+            // a pk3 the launcher or the app wrote into data/ is only in the
+            // search path after a rescan (or after the next engine start)
+            next_rescan = host.realtime + 15;
+            Cbuf_AddText(cmd_local, "\nfs_rescan\n");
+        }
     }
     action = TouchMusic_Policy(in_game, present, playing);
     if (action > 0)
     {
-        playing = true;
-        Cbuf_AddText(cmd_local, "\nmusic_playlist_index -1; menu_cdtrack rising-of-the-phoenix; fs_rescan; cd loop rising-of-the-phoenix\n");
-        Con_Printf("MUSIC: start menu theme\n");
+        // fs_rescan the first time only: it reopens every pack, and a retry has
+        // nothing new to find in the search path that the first one missed
+        if (asked_before)
+        {
+            Cbuf_AddText(cmd_local, "\nmusic_playlist_index -1; menu_cdtrack rising-of-the-phoenix; cd loop rising-of-the-phoenix\n");
+            if (!said_retry)
+            {
+                said_retry = true;
+                Con_Printf("MUSIC: theme not playing, asking again\n");
+            }
+        }
+        else
+        {
+            asked_before = true;
+            Cbuf_AddText(cmd_local, "\nmusic_playlist_index -1; menu_cdtrack rising-of-the-phoenix; fs_rescan; cd loop rising-of-the-phoenix\n");
+            Con_Printf("MUSIC: start menu theme\n");
+        }
+        next_check = TouchMusic_NextCheck(host.realtime, 1);
     }
     else if (action < 0)
     {
-        playing = false;
+        asked_before = false;
+        said_retry = false;
         Cbuf_AddText(cmd_local, "\ncd stop\n");
         Con_Printf("MUSIC: stop menu theme for match\n");
     }

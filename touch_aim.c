@@ -40,6 +40,7 @@ primary, no lead, no switching.
 #include "touch_hook.h"
 #include "touch_tactics.h"
 #include "touch_assist.h"
+#include "touch_aim_targets.h"
 
 extern cvar_t vid_touchscreen;
 extern qbool cl_touch_csqc_active;
@@ -373,6 +374,8 @@ static struct
 	int teamplay_ofs, teamplay_type;
 	int projtype_ofs, projtype_type;
 	qbool projtype_is_cnt;
+	int animstate_ofs, animstate_type; // .anim_state: ANIMSTATE_FROZEN
+	int isdead_ofs, isdead_type;       // .csqcmodel_isdead, where the CSQC has it
 } ta;
 
 #define SHOT_MAX 32
@@ -440,6 +443,8 @@ void TouchAim_Init(void)
 	ta.lookscale = 1;
 	ta.teamplay_ofs = -1;
 	ta.projtype_ofs = -1;
+	ta.animstate_ofs = -1;
+	ta.isdead_ofs = -1;
 	ta.held_last = -1;
 	ta.switch_to = -1;
 	ta.manual_switch = ta.own_switch = -100;
@@ -472,6 +477,8 @@ void TouchAim_ProgsChanged(void)
 	mdef_t *d;
 	ta.teamplay_ofs = -1;
 	ta.projtype_ofs = -1;
+	ta.animstate_ofs = -1;
+	ta.isdead_ofs = -1;
 	ta.rk_state = RK_IDLE;
 	ta.rk_ent = 0;
 	ta.held_last = -1;
@@ -504,6 +511,27 @@ void TouchAim_ProgsChanged(void)
 		ta.projtype_type = d->type & ~DEF_SAVEGLOBAL;
 		if (numeric_type(ta.projtype_type))
 			ta.projtype_ofs = d->ofs;
+	}
+	// frozen: .anim_state carries ANIMSTATE_FROZEN -- the Freeze Tag mutator
+	// sets it in its PlayerAnim hook, player_anim for the ice status effect --
+	// and CSQCModel networks the whole anim_state with the player, so the
+	// engine can tell a frozen player without reading any stats (per-player
+	// stats are not networked to the CSQC at all)
+	d = PRVM_ED_FindField(prog, "anim_state");
+	if (d)
+	{
+		ta.animstate_type = d->type & ~DEF_SAVEGLOBAL;
+		if (numeric_type(ta.animstate_type))
+			ta.animstate_ofs = d->ofs;
+	}
+	// .csqcmodel_isdead, where the CSQC has it: dead before the corpse is
+	// solid (a frozen player in Freeze Tag is alive, with 1 health)
+	d = PRVM_ED_FindField(prog, "csqcmodel_isdead");
+	if (d)
+	{
+		ta.isdead_type = d->type & ~DEF_SAVEGLOBAL;
+		if (numeric_type(ta.isdead_type))
+			ta.isdead_ofs = d->ofs;
 	}
 	// the damage the player has dealt, which every CSQC keeps for the hit
 	// sound: STAT_HITSOUND_DAMAGE_DEALT_TOTAL.m_id is its stat number
@@ -668,6 +696,16 @@ static qbool is_enemy(int n, int team_game)
 		return true;
 	// Team game, or not known: the same pants colour is the same team.
 	return (them->colors & 15) != (me->colors & 15);
+}
+
+// A float or int CSQC field read as an int, 0 when the CSQC lacks it.
+static int cand_field_int(prvm_edict_t *ed, int ofs, int type)
+{
+	prvm_eval_t *v;
+	if (ofs < 0)
+		return 0;
+	v = PRVM_EDICTFIELDVALUE(ed, ofs);
+	return type == ev_float ? (int)v->_float : v->_int;
 }
 
 // Automatic weapon switching: the player's setting, and the server allows it
@@ -1203,7 +1241,7 @@ static void scan(const vec3_t eye, const vec3_t fwd, float cone, float lock_cone
 	{
 		prvm_edict_t *ed = PRVM_EDICT_NUM(i);
 		vec3_t org, mins, maxs, bmin, bmax, center, dir, vel, lead, lbmin, lbmax;
-		float dist, err, t, alpha, hw, tof = 0;
+		float dist, err, t, hw, tof = 0;
 		int n;
 		qbool enemy, has_lead = false, on_lead = false;
 		float e0;
@@ -1213,19 +1251,33 @@ static void scan(const vec3_t eye, const vec3_t fwd, float cone, float lock_cone
 		n = (int)PRVM_clientedictfloat(ed, entnum);
 		if (n < 1 || n > cl.maxclients || n == cl.realplayerentity || n == cl.viewentity)
 			continue;
-		if (is_spectator_slot(n))
-			continue;
+		// Who may be the target at all (touch_aim_targets.h): alive, in the
+		// round, not a teammate, and not frozen. In Freeze Tag a frozen player
+		// takes no damage, so a crosshair held on the ice block would only mean
+		// the enemy standing beside it is not being shot.
+		{
+			touch_aim_cand_t cand;
+			int why;
+			memset(&cand, 0, sizeof(cand));
+			cand.has_name = cl.scores[n - 1].name[0] != 0;
+			cand.spectator = is_spectator_slot(n);
+			cand.teammate = !is_enemy(n, team_game);
+			cand.dead = PRVM_clientedictfloat(ed, solid) == SOLID_CORPSE
+				|| cand_field_int(ed, ta.isdead_ofs, ta.isdead_type) != 0;
+			cand.frozen = TouchAim_AnimFrozen(cand_field_int(ed, ta.animstate_ofs, ta.animstate_type));
+			cand.drawn = PRVM_clientedictfloat(ed, modelindex) != 0
+				&& PRVM_clientedictfloat(ed, drawmask) != 0
+				&& !((int)PRVM_clientedictfloat(ed, effects) & EF_NODRAW);
+			cand.alpha = PRVM_clientedictfloat(ed, alpha);
+			why = TouchAim_TargetCheck(&cand);
+			if (why != TOUCH_AIM_TARGET_OK)
+			{
+				if (cl_touch_aim_debug.integer >= 3 && why == TOUCH_AIM_TARGET_FROZEN)
+					Con_Printf("touch aim: %s is frozen, not a target\n", player_name(n));
+				continue;
+			}
+		}
 		enemy = is_enemy(n, team_game);
-		// alive, and drawn visibly
-		if (PRVM_clientedictfloat(ed, solid) == SOLID_CORPSE)
-			continue;
-		if (!PRVM_clientedictfloat(ed, modelindex) || !PRVM_clientedictfloat(ed, drawmask))
-			continue;
-		if ((int)PRVM_clientedictfloat(ed, effects) & EF_NODRAW)
-			continue;
-		alpha = PRVM_clientedictfloat(ed, alpha);
-		if (alpha < 0 || (alpha > 0 && alpha < 0.4f))
-			continue; // invisibility: never reveal a hidden player
 		VectorCopy(PRVM_clientedictvector(ed, origin), org);
 		VectorCopy(PRVM_clientedictvector(ed, mins), mins);
 		VectorCopy(PRVM_clientedictvector(ed, maxs), maxs);

@@ -34,6 +34,7 @@ signon's baselines and the entity updates carry.
 
 #include "quakedef.h"
 #include "touch_joinpreview.h"
+#include "touch_frontend.h" // TouchFE_MenuHidden: the native menu is not drawn
 
 static cvar_t touch_join_preview = {CF_CLIENT, "touch_join_preview", "1",
 	"draw the world from a spectator camera as soon as a joining client has it, with the load's progress as a bar, instead of the full-screen loading page (Godnotic); 0 = the loading page all the way"};
@@ -62,8 +63,10 @@ qbool TouchJoinPreview_Active(void)
 {
 	if (!touch_join_preview.integer)
 		return false;
-	if (key_dest != key_game)
+	if (key_dest != key_game && !TouchFE_MenuHidden())
 		return false;   // the in-match menu is an overlay: no preview camera under it
+		// (a menu the native front end hides is not drawn: the preview is behind
+		// the app's own join page, so it stays on)
 	if (cls.state != ca_connected || cls.signon >= SIGNONS)
 		return false;
 	if (!scr_refresh.integer || vid_hidden)
