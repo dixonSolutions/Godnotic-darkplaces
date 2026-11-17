@@ -21,6 +21,7 @@ static inline int TouchMusic_Policy(int in_game, int theme_present, int playing)
 #define TM_STAGE_MENU 0
 #define TM_STAGE_JOINING 1
 #define TM_STAGE_GAME 2
+#define TM_STAGE_DOWNLOAD 3
 
 /* -1: stop the theme, 0: leave it alone, 1: start it.
  *
@@ -38,6 +39,8 @@ static inline int TouchMusic_JoinPolicy(int stage, int theme_present, int theme_
             return 0;
         return (!map_music && allow_in_game) ? 0 : -1;
     }
+    /* The data-download screen is not a match: the theme belongs there just
+     * as it does in the menu. */
     if (map_music)
         return theme_playing ? -1 : 0;
     if (!theme_playing && theme_present)

@@ -42,6 +42,7 @@ Everything works on the desktop too, without a sink, for headless tests
 #include "touch_frontend.h"
 #include "touch_joinpreview.h" // Touch: the "preview" join stage
 #include "touch_music.h"
+#include "touch_datafetch.h"
 #include "touch_loadfs.h" // Touch: the theme pack may land after start-up
 #include "cdaudio.h"
 #include "touch_hud.h"
@@ -1600,6 +1601,8 @@ void TouchMusic_Update(void)
         stage = TM_STAGE_GAME;
     else if (cls.connect_trying || cls.state != ca_disconnected)
         stage = TM_STAGE_JOINING;
+    else if (TouchData_Downloading())
+        stage = TM_STAGE_DOWNLOAD;
     else
         stage = TM_STAGE_MENU;
     if (stage != TM_STAGE_GAME && !theme_playing && bgmvolume.value > 0 && host.realtime >= next_check)

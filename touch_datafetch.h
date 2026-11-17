@@ -15,6 +15,10 @@ qbool TouchData_JoinNeedsMap(const char *worldmodel, char *text, size_t textsize
 /// True while a join waits for its map: the join did not fail (touch_joinfail.c).
 qbool TouchData_JoinPending(void);
 
+/// True while the progressive downloader is active (fetching, paused, waiting
+/// or an error): the menu theme owns the sound on that screen.
+qbool TouchData_Downloading(void);
+
 /// For map lists (touch_uib_src.c, the native front ends): 0 the map can be
 /// played, 1 its pack is still downloading (`progress` 0..1 when it is the
 /// wanted map, else -1), 2 it is not here and nothing is fetching it.

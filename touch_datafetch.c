@@ -51,6 +51,11 @@ static qbool TouchData_Active(void)
 	return !strcmp(s, "fetching") || !strcmp(s, "paused") || !strcmp(s, "waiting") || !strcmp(s, "error");
 }
 
+qbool TouchData_Downloading(void)
+{
+	return TouchData_Active();
+}
+
 /// a map of the set whose pack is still to come: its mapinfo is in the core, its bsp is not here
 static qbool TouchData_MapQueued(const char *map)
 {
