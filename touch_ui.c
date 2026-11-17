@@ -2,6 +2,14 @@
  * Touch text-sheet: keyboard layers, command palette, console/chat/preview layout.
  */
 #include "quakedef.h"
+
+/* Android's text entry is the system keyboard: its IME carries the input
+ * methods the engine's own keys lack, and a phone's field raises it. */
+#ifdef __ANDROID__
+#define TOUCHUI_SYSTEM_KEYS_ONLY 1
+#else
+#define TOUCHUI_SYSTEM_KEYS_ONLY 0
+#endif
 #include "touch_spectate.h"
 #include "touch_ui.h"
 #include "touch_shellbtn.h"
@@ -29,7 +37,8 @@ cvar_t touch_kb_hold_time = {CF_CLIENT | CF_ARCHIVE, "touch_kb_hold_time", "0.45
 cvar_t touch_conui_shade = {CF_CLIENT | CF_ARCHIVE, "touch_conui_shade", "0.62", "console sheet background shade alpha"};
 cvar_t touch_conui_palette_file = {CF_CLIENT | CF_ARCHIVE, "touch_conui_palette_file", "touch/console_palette.txt", "file of preset console commands for the COMMANDS tab"};
 /* Not archived: touch/xonotic.cfg sets it each start, like scr_loadingscreen_picture. */
-cvar_t touch_menu_keyboard = {CF_CLIENT | CF_ARCHIVE, "touch_menu_keyboard", "0", "keyboard for menu text fields on a touch screen: 0 = automatic (the game's own keys for languages written in Latin letters, with no keyboard attached; the system keyboard and its input methods for Chinese, Japanese, Korean, Cyrillic, Greek and others), 1 = the game's own keys, 2 = the system keyboard"};
+cvar_t touch_menu_keyboard = {CF_CLIENT | CF_ARCHIVE, "touch_menu_keyboard", "2", "keyboard for menu text fields on a touch screen: 2 (default) = the system keyboard and its input methods, 1 = the game's own keys, 0 = automatic (the system keyboard on Android; elsewhere the game's own keys for languages written in Latin letters with no keyboard attached, the system keyboard for the others)"};
+static cvar_t touch_ime_height = {CF_CLIENT, "_touch_ime_height", "0", "internal: the system on-screen keyboard's height in window pixels, reported by the Android activity; 0 while it is away"};
 static cvar_t touch_menu_keys_top = {CF_CLIENT | CF_READONLY, "_touch_menu_keys_top", "0", "top of the engine's keys under a menu text field, as a fraction of the screen height; 0 while they are not shown (touch_menu_sheet.qc reads it)"};
 static cvar_t touch_menu_keys_ask = {CF_CLIENT, "_touch_menu_keys_ask", "0", "set by the menu: 1 when a tap lands on a text field (the engine's keys come back after DONE), -1 when Back puts them away"};
 cvar_t touch_conback_picture = {CF_CLIENT, "touch_conback_picture", "", "console background picture used instead of gfx/conback when it loads (empty = gfx/conback); a name only this build ships, since downloaded data carries its own gfx/conback"};
@@ -47,18 +56,26 @@ static char touchui_palette_loaded_path[MAX_QPATH];
 static int touchui_bksp_finger = -1;
 
 /*
- * Keys shown or hidden. With the touch controls on and no keyboard listed the
- * sheet shows its keys, as it always has; otherwise they start hidden and the
- * KEYBOARD toggle in the header opens them. The player's choice holds until
- * a keyboard is plugged in or out or the input mode switches.
+ * Keys shown or hidden. Text entry takes the system keyboard (vid_sdl.c raises
+ * it for the console and chat), so the sheet starts without keys of its own;
+ * the KEYBOARD toggle in the header opens them where the system's will not
+ * come up. The player's choice holds until a keyboard is plugged in or out or
+ * the input mode switches.
  */
 static int touchui_keys_override = -1;
 static int touchui_keys_override_for;
 
 static float touchui_chat_keys_top = -1;
 
+static float TouchUI_ImeHeight(void);
+
 float TouchUI_ChatKeysTop(void)
 {
+	float ime = TouchUI_ImeHeight();
+	/* The system keyboard covers the bottom: the line being typed is drawn
+	 * above it, as it is above the engine's keys. */
+	if (ime > 0 && touchui_chat_keys_top <= 0)
+		return vid_conheight.value - ime;
 	return touchui_chat_keys_top;
 }
 
@@ -132,10 +149,27 @@ static float TouchUI_KeysHeight(float w, float h, float hdr_h, float kb_frac)
 	return min(kb_h, h - hdr_h - TOUCHUI_MIN_LOG_DP * dp);
 }
 
+/*
+ * The system keyboard's height in console units: the Android activity reports
+ * it in window pixels (_touch_ime_height), 0 while it is away. The console
+ * input line, the chat line being typed and the sheet's plates stop above it,
+ * as they do above the engine's own keys.
+ */
+static float TouchUI_ImeHeight(void)
+{
+	cvar_t *v = Cvar_FindVar(&cvars_all, "_touch_ime_height", ~0);
+	if (!v || v->value <= 0 || vid.mode.height <= 0 || vid_conheight.value <= 0)
+		return 0;
+	return bound(0.0f, v->value * vid_conheight.value / (float)vid.mode.height, vid_conheight.value * 0.7f);
+}
+
 /* SCR_SetUpToDrawConsole: the console stops above the keys, so the input line
  * stays in sight while typing. */
 float TouchUI_ConsoleHeight(float con_h)
 {
+	float ime = TouchUI_ImeHeight();
+	if (ime > 0)
+		con_h = min(con_h, vid_conheight.value - ime);
 	if (touchui_console_keys_top <= 0 || host.realtime - touchui_console_keys_time > 0.5)
 		return con_h;
 	return min(con_h, touchui_console_keys_top);
@@ -332,6 +366,7 @@ static void TouchUI_LabelFont_f(cmd_state_t *cmd);
 
 void TouchUI_RegisterCvars(void)
 {
+	Cvar_RegisterVariable(&touch_ime_height);
 	Cvar_RegisterVariable(&touch_kb_height);
 	Cvar_RegisterVariable(&touch_kb_gap);
 	Cvar_RegisterVariable(&touch_kb_opacity);
@@ -413,7 +448,9 @@ qbool TouchUI_KeysShown(touchui_sheet_t kind)
 		touchui_keys_override = -1;
 	if (touchui_keys_override >= 0)
 		return touchui_keys_override != 0;
-	return ctx == 2; /* touch controls on, no keyboard */
+	/* The system keyboard is the one for text entry, in landscape too, so the
+	 * sheet does not put its own keys over it; KEYBOARD opens them. */
+	return false;
 }
 
 /*
@@ -481,8 +518,13 @@ static qbool TouchUI_MenuKeysWanted(void)
 {
 	if (touch_menu_keyboard.integer == 1)
 		return true;
-	if (touch_menu_keyboard.integer == 2)
+	if (touch_menu_keyboard.integer == 2 || TOUCHUI_SYSTEM_KEYS_ONLY)
+	{
+		/* Automatic is the system keyboard on Android too: the IME is what a
+		 * field on a phone raises, input methods and all. An archived 0 from a
+		 * build before the default changed gets the same. */
 		return false;
+	}
 	/* A keyboard to type on: no keys over the menu. */
 	if (VID_HasKeyboard())
 		return false;
@@ -1244,6 +1286,13 @@ int TouchUI_LayoutSheet(touchui_sheet_t kind, float x, float y, float w, float h
 	touchui_processing_menu = kind == TOUCHUI_SHEET_MENU;
 	if (kind == TOUCHUI_SHEET_MENU)
 		return TouchUI_LayoutMenuKeys(x, y, w, h, out, maxout);
+	/* The system keyboard covers the bottom: the sheet's plates and quick
+	 * phrases stay above it, as they do above the engine's keys. */
+	{
+		float ime = TouchUI_ImeHeight();
+		if (ime > 0 && h > ime + 64.0f)
+			h -= ime;
+	}
 	if (!vid_touchscreen.integer && kind != TOUCHUI_SHEET_PREVIEW)
 		return TouchUI_LayoutMouseSheet(kind, x, y, w, h, out, maxout);
 

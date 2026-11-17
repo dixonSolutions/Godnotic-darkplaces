@@ -118,23 +118,23 @@ int TouchUI_SpectatorState(void);
 int TouchUI_LayoutSheet(touchui_sheet_t kind, float x, float y, float w, float h,
 	touchui_item_t *out, int maxout);
 
-/* Whether the sheet shows its on-screen keys: by default with the touch
- * controls on and no keyboard listed, otherwise after the player opens them
- * with the KEYBOARD toggle. */
+/* Whether the sheet shows its own keys: only after the player opens them with
+ * the KEYBOARD toggle. Text entry takes the system keyboard (vid_sdl.c raises
+ * it), in landscape too, so no keys of the engine's own cover it unasked. */
 qbool TouchUI_KeysShown(touchui_sheet_t kind);
-/* The console or chat sheet is open with its own keys showing and no keyboard
- * is listed: the system's on-screen keyboard would only cover them, so
- * vid_sdl.c keeps SDL text input (which raises it on Android) off. With HIDE
- * KEYS chosen, or a keyboard listed, text input works as before. */
+/* The engine's keys are up because the player asked for them: the system
+ * keyboard would only cover them, so vid_sdl.c keeps SDL text input (which
+ * raises it on Android) off. With the defaults (touch_menu_keyboard 2, the
+ * sheet's keys closed) this is false for every text field, and the system's
+ * keyboard is the one that types. */
 qbool TouchUI_EngineKeysUp(void);
 /*
  * Menu text fields (docs/TOUCH_CONSOLE_SPEC.md, "Menu text fields"). While a
  * menu text field has focus (the menu sets vid_touchscreen_showkeyboard) the
- * engine's own keys come up along the bottom instead of the system keyboard,
- * as for the console and chat: touch_menu_keyboard 0 picks them for Latin
- * languages with no keyboard attached and leaves the system keyboard (and
- * its input methods) to the others; 1 always the engine's keys, 2 always the
- * system keyboard. DONE puts them away until a tap lands on a field again
+ * field gets touch_menu_keyboard: 2 (the default) the system keyboard, as the
+ * console and chat do; 1 the engine's own keys along the bottom instead;
+ * 0 automatic (the system keyboard on Android, the engine's keys for Latin
+ * languages elsewhere with no keyboard attached). DONE puts them away until a tap lands on a field again
  * (the menu sets _touch_menu_keys_ask). The menu reads _touch_menu_keys_top
  * to keep the field above them and to leave presses there to the keys.
  */
@@ -143,9 +143,11 @@ qbool TouchUI_MenuKeysUp(void);
  * NULL (the background switched off) stays NULL. */
 struct cachepic_s *TouchUI_ConbackPic(struct cachepic_s *stock, unsigned int flags);
 extern struct cvar_s touch_conback_picture;
-/* Top of the chat sheet's keys from the last layout, or -1 when none show. */
+/* Top of the chat sheet's keys from the last layout, the system keyboard's top
+ * while it is up, or -1 when neither shows. */
 float TouchUI_ChatKeysTop(void);
-/* SCR_SetUpToDrawConsole: the console height, stopped above the touch keys. */
+/* SCR_SetUpToDrawConsole: the console height, stopped above the touch keys or
+ * the system keyboard. */
 float TouchUI_ConsoleHeight(float con_h);
 /* Height of the console / chat sheet's header row, sheet units. */
 float TouchUI_SheetHeaderHeight(float h);

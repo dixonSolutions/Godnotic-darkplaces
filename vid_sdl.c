@@ -431,7 +431,7 @@ void VID_ShowKeyboard(qbool show)
 	// but never a character.
 	if (!VID_NeedsScreenKeyboard())
 		show = true;
-	if (show && TouchUI_EngineKeysUp()) show = false; // Touch: no system keyboard over the engine's own keys
+	if (show && TouchUI_EngineKeysUp()) show = false; // Touch: the player asked for the keys (touch_ui.c); unasked, text entry is the system keyboard's
 
 #ifdef __EMSCRIPTEN__
 	// A browser raises its on-screen keyboard only for a focused text field:
@@ -454,7 +454,7 @@ void VID_ShowKeyboard(qbool show)
 // Re-request compositor OSK (mutter/lomiri may ignore a sticky enable).
 static void VID_PulseKeyboard(void)
 {
-	if (TouchUI_EngineKeysUp()) { VID_ShowKeyboard(false); return; } // Touch: the engine's keys are up
+	if (TouchUI_EngineKeysUp()) { VID_ShowKeyboard(false); return; } // Touch: the engine's keys are up because the player asked for them
 	if (!VID_NeedsScreenKeyboard())
 	{
 		VID_ShowKeyboard(true);
@@ -1547,7 +1547,7 @@ void IN_Move( void )
 	oldkeydest = keydest;
 	oldshowkeyboard = !!vid_touchscreen_showkeyboard.integer;
 	oldneedsosk = needsosk;
-	if (VID_ShowingKeyboard() && TouchUI_EngineKeysUp()) VID_ShowKeyboard(false); // Touch: KEYBOARD tapped again after HIDE KEYS
+	if (VID_ShowingKeyboard() && TouchUI_EngineKeysUp()) VID_ShowKeyboard(false); // Touch: KEYBOARD asked for the engine's keys instead of the system's
 
 	// A vote or another CSQC pointer UI: a finger is its pointer, with the
 	// touch controls shown or hidden (touch_hud.c).

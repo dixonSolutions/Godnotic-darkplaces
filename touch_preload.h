@@ -19,7 +19,8 @@
 // game frame), the entries are loaded in the order models, pictures, shaders,
 // sounds, within touch_preload_budget ms. A first game on a map with no list
 // uses the built-in seed below in full. With touch_preload_defer enabled, the
-// seed is capped by touch_preload_seed_budget and remaining entries run in
+// seed is capped by touch_preload_seed_budget for a local game; a remote join
+// queues the entire speculative seed and recorded models. Deferred entries run in
 // budgeted menu frames after loading, in the
 // same order; an individual asset may exceed either budget. Active play never
 // runs this background queue. The seed covers bot models, common weapons and
@@ -33,7 +34,7 @@
 
 static cvar_t touch_preload = {CF_CLIENT, "touch_preload", "1", "load what earlier games on this map loaded late (models, sounds, GLSL shaders) under the loading screen before the first game frame, and record what this game loads late (Godnotic); 0 = neither"};
 static cvar_t touch_preload_budget = {CF_CLIENT, "touch_preload_budget", "4000", "milliseconds the preload may add to a map load at most"};
-static cvar_t touch_preload_defer = {CF_CLIENT, "touch_preload_defer", "0", "defer seed work over the loading budget to menu render frames (experimental)"};
+static cvar_t touch_preload_defer = {CF_CLIENT, "touch_preload_defer", "0", "defer seed work and remote replay models to menu render frames (experimental)"};
 static cvar_t touch_preload_seed_budget = {CF_CLIENT, "touch_preload_seed_budget", "400", "milliseconds of seed work during loading (one asset may exceed the budget)"};
 static cvar_t touch_preload_frame_budget = {CF_CLIENT, "touch_preload_frame_budget", "8", "milliseconds per frame for deferred seed work while a menu is open (one asset may exceed the budget)"};
 static cvar_t touch_preload_keep = {CF_CLIENT, "touch_preload_keep", "4", "an entry of a map's preload list is dropped once that many games on the map did not need it"};
@@ -49,7 +50,7 @@ typedef struct tp_entry_s
 	int age;        // games of this map since it was last needed
 	float cost;     // ms it took when loaded late
 	qbool used;     // loaded late in this game
-	qbool pending;  // seed work deferred until a menu frame
+	qbool pending;  // replay work deferred until a menu frame
 }
 tp_entry_t;
 
@@ -67,7 +68,7 @@ static struct
 	qbool glsl_pending;
 	double glsl_begin;
 	int pending;
-	model_t *pending_world; // world for which the deferred seed was queued
+	model_t *pending_world; // world for which the deferred replay was queued
 	int late_count;
 	double late_ms;
 }
@@ -325,8 +326,8 @@ static qbool TP_Load(tp_entry_t *e)
 	return false;
 }
 
-// Replay the map list as before. For a first visit, cap the seed's loading
-// work and queue the remainder in the same model/picture/shader/sound order.
+// Replay a map list, or its seed on a first visit. When opted in, queue
+// speculative remote models and work over budget in model/picture/shader/sound order.
 static void TP_Replay(void)
 {
 	double start = Sys_DirtyTime(), budget, t0;
@@ -337,7 +338,7 @@ static void TP_Replay(void)
 		return;
 	have = TP_Open(cl.worldbasename);
 	seed = !have && touch_preload_seed.integer;
-	defer = seed && touch_preload_defer.integer;
+	defer = touch_preload_defer.integer && (seed || !sv.active);
 	if (seed)
 	{
 		for (i = 0; tp_seed[i]; i++)
@@ -347,7 +348,7 @@ static void TP_Replay(void)
 				e->age = 1;
 		}
 	}
-	budget = (seed ? min(touch_preload_budget.value, touch_preload_seed_budget.value) : touch_preload_budget.value) * 0.001;
+	budget = (seed ? min(touch_preload_budget.value, defer && !sv.active ? 0 : touch_preload_seed_budget.value) : touch_preload_budget.value) * 0.001;
 	if (defer)
 		tp.pending_world = cl.worldmodel;
 	tp.replaying = true;
@@ -357,9 +358,9 @@ static void TP_Replay(void)
 			tp_entry_t *e = &tp.list[i];
 			if (TP_KindOrder(e->kind) != pass)
 				continue;
-			if ((!seed || defer) && Sys_DirtyTime() - start >= budget)
+			if ((defer && !sv.active && e->kind == 'm') || ((!seed || defer) && Sys_DirtyTime() - start >= budget))
 			{
-				if (seed) { e->pending = true; tp.pending++; }
+				if (defer) { e->pending = true; tp.pending++; }
 				skipped++;
 				continue;
 			}
