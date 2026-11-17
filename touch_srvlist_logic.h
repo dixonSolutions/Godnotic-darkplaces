@@ -46,6 +46,25 @@ shared by touch_srvlist.c and tests/srvlist/srvlist_logic_test.c.
 #define TOUCHSL_MAX_AGE           (7 * 86400)   // a server not seen for a week is forgotten
 #define TOUCHSL_MAX_FAILS         3             // sessions in a row without an answer before that
 
+// Retry a silent master with an exponential delay, capped at 30 seconds.
+static inline double TouchSL_MasterRetryDelay(unsigned attempt)
+{
+	double delay = TOUCHSL_MASTER_WAIT;
+	while (attempt-- && delay < 30.0)
+		delay *= 2.0;
+	return delay > 30.0 ? 30.0 : delay;
+}
+
+// 0: not known yet or LAN-only, 1: replied, 2: no reply within the wait.
+static inline int TouchSL_MasterState(int asked, int configured, int lanonly, double elapsed, unsigned replies)
+{
+	if (!asked || !configured || lanonly)
+		return 0;
+	if (replies)
+		return 1;
+	return elapsed >= TOUCHSL_MASTER_WAIT ? 2 : 0;
+}
+
 // ---------------------------------------------------------------------------
 // The saved list
 // ---------------------------------------------------------------------------
