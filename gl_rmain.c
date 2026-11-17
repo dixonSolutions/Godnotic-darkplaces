@@ -5845,6 +5845,7 @@ void R_RenderView(int fbo, rtexture_t *depthtexture, rtexture_t *colortexture, i
 		GL_ScissorTest(true);
 	GL_Scissor(r_refdef.view.viewport.x, r_refdef.view.viewport.y, r_refdef.view.viewport.width, r_refdef.view.viewport.height);
 	R_RenderScene(viewfbo, viewdepthtexture, viewcolortexture, viewx, viewy, viewwidth, viewheight);
+	TouchLoadTime_WorldDrawn(fbo); // Touch: record a rendered main world view
 	r_fb.water.numwaterplanes = 0;
 
 	// postprocess uses textures that are not aligned with the viewport we're rendering, so no scissoring

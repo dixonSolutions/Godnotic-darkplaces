@@ -33,6 +33,9 @@ as they arrive. Neither applies in the menu or in the game.
 #include "touch_loadcvar.h"
 #include "touch_net.h"
 #include "image.h"
+#ifdef __ANDROID__
+#include "andysu_engine.h"
+#endif
 #ifdef __linux__
 #include <unistd.h>
 #include <time.h>
@@ -46,6 +49,13 @@ static cvar_t touch_load_lazypics = {CF_CLIENT, "touch_load_lazypics", "1", "the
 static cvar_t touch_load_lazydeflate = {CF_SERVER, "touch_load_lazydeflate", "1", "deflate csprogs.dat when a client first downloads it instead of at every map start (Godnotic)"};
 static cvar_t touch_loadtime_menu = {CF_CLIENT | CF_READONLY, "_touch_loadtime_menu", "0", "1 once the main menu has drawn its first frame (for scripts that wait for it)"};
 static cvar_t touch_loadtime_game = {CF_CLIENT | CF_READONLY, "_touch_loadtime_game", "0", "counts loads that reached their first game frame (for scripts that wait for one)"};
+static qbool tlt_world_drawn;
+
+void TouchLoadTime_WorldDrawn(int fbo)
+{
+	if (!fbo && r_refdef.view.ismain && cl.csqc_vidvars.drawworld && r_refdef.scene.worldmodel && !scr_loading && cls.state == ca_connected && cls.signon == SIGNONS)
+		tlt_world_drawn = true;
+}
 
 static const char *tlt_names[TLT_COUNT] =
 {
@@ -268,6 +278,12 @@ void TouchLoadTime_Frame(void)
 {
 	double now = Sys_DirtyTime();
 	int i;
+
+#ifdef __ANDROID__
+	Andysu_DrawnFrame(now, host.state == host_active && !scr_loading && key_dest == key_menu && cls.state != ca_connected,
+		tlt_world_drawn);
+#endif
+	tlt_world_drawn = false;
 
 	// cl_screen calls this after drawing, with the render context current.
 	TP_Deferred();

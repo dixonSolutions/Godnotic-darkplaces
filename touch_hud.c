@@ -694,9 +694,9 @@ static void layout_cvar(const char *name, float value)
 {
 	cvar_t *var = Cvar_FindVar(&cvars_all, name, ~0);
 	char text[32];
-	if (var && fabs(var->value - value) < 0.0005f)
+	if (var && fabs(var->value - value) < 0.00000001f)
 		return;
-	dpsnprintf(text, sizeof(text), "%.4f", value);
+	dpsnprintf(text, sizeof(text), "%.9f", value);
 	if (var)
 		Cvar_SetQuick(var, text);
 	else
@@ -766,14 +766,17 @@ static void topbar_sync(void)
 	topbar_valid = false;
 	if ((TouchLua_VibrateHook != NULL) != (touch_haptics_available.integer != 0))
 		Cvar_SetValueQuick(&touch_haptics_available, TouchLua_VibrateHook != NULL);
-	if (!touch_topbar_auto.integer && vid_touchscreen.integer && cls.state == ca_connected && W >= 16 && H >= 16
+	if (!touch_topbar_auto.integer && (vid_touchscreen.integer || vid_touchscreen_detected.integer) && cls.state == ca_connected && W >= 16 && H >= 16
 		&& topbar_user_overlaps())
 	{
 		Con_Printf("Touch HUD: the saved top bar had overlapping buttons, using the automatic row\n");
 		Cvar_SetValueQuick(&touch_topbar_auto, 1);
 	}
-	if (!touch_topbar_auto.integer || !vid_touchscreen.integer || cls.state != ca_connected || W < 16 || H < 16)
+	if (!touch_topbar_auto.integer || !(vid_touchscreen.integer || vid_touchscreen_detected.integer) || cls.state != ca_connected || W < 16 || H < 16)
+	{
+		layout_cvar("_touch_topbar_active", 0);
 		return;
+	}
 	if (insets && insets[0])
 		sscanf(insets, "%f %f %f %f %f", &in_l, &in_t, &in_r, &in_b, &dens);
 	memset(&in, 0, sizeof(in));
@@ -783,20 +786,26 @@ static void topbar_sync(void)
 	in.in_l = in_l * px2con;
 	in.in_t = in_t * px2con;
 	in.in_r = in_r * px2con;
-	widget_half(cv("touch_pause_size", 0.060f), 1, &hx, &hy);
-	in.pill_h = hy * 2;
+	// Use the larger of the engine and CSQC density floors for each saved size.
+	{
+		float floor_h = TOUCHDP_PILL_HEIGHT * in.u;
+		float vw = cv("vid_width", 0), vh = cv("vid_height", 0);
+		if (vw > 0 && vh > 0)
+			floor_h = max(floor_h, TOUCHDP_PILL_HEIGHT * TouchDp_Density(cv("vid_touchscreen_ydpi", 0), min(vw, vh)) * H / vh);
+		widget_half(cv("touch_pause_size", 0.060f), 1, &hx, &hy); in.menu_h = max(hy * 2, floor_h); in.menu_w = in.menu_h * max(1.0f, cv("touch_pause_aspect", 2.4f));
+		widget_half(cv("touch_scores_size", 0.060f), 1, &hx, &hy); in.score_h = max(hy * 2, floor_h); in.score_w = in.score_h * max(1.0f, cv("touch_scores_aspect", 2.4f));
+		widget_half(cv("touch_chat_size", 0.060f), 1, &hx, &hy); in.chat_h = max(hy * 2, floor_h); in.chat_w = in.chat_h * max(1.0f, cv("touch_chat_aspect", 2.4f));
+	}
 	in.aspect = 2.4f;
 	in.console = Cvar_VariableValue(&cvars_all, "touch_shell_button", ~0) >= 2
 		? bound(32.0f, Cvar_VariableValue(&cvars_all, "touch_shell_button_size", ~0), 96.0f) * in.u : 0;
-	// the row is sized for the console button's slot at the pills' height or more
-	if (in.console > 0 && in.console < in.pill_h)
-		in.console = in.pill_h;
 	in.menu = cv("touch_pause_visible", 1) != 0;
 	in.score = cv("touch_scores_visible", 1) != 0;
 	in.chat = cv("touch_chat_visible", 1) != 0;
 	in.left_handed = flip;
 	TouchTopBar_Layout(&in, &topbar);
 	topbar_valid = true;
+	layout_cvar("_touch_topbar_active", 1);
 	// the pills' own cvars: centres as fractions, before the left-handed mirror
 #define BAR_CVARS(rect, prefix) \
 	if ((rect).w > 0) \
@@ -804,7 +813,8 @@ static void topbar_sync(void)
 		float nx = ((rect).x + (rect).w * 0.5f) / W; \
 		layout_cvar(prefix "_x", flip ? 1 - nx : nx); \
 		layout_cvar(prefix "_y", ((rect).y + (rect).h * 0.5f) / H); \
-		layout_cvar(prefix "_aspect", topbar.aspect); \
+		layout_cvar(prefix "_bar_w", (rect).w / W); \
+		layout_cvar(prefix "_bar_h", (rect).h / H); \
 	}
 	BAR_CVARS(topbar.menu, "touch_pause")
 	BAR_CVARS(topbar.score, "touch_scores")
@@ -1453,16 +1463,21 @@ static qbool weapon_button_shown(void)
 	return cv("touch_weapon_visible", 0) || (cv("touch_weplist_visible", 1) && owned_weapon_count() == 0);
 }
 
+static qbool topbar_hit(const touchbar_rect_t *r, float x, float y)
+{
+	return r->w > 0 && x >= r->x && x <= r->x + r->w && y >= r->y && y <= r->y + r->h;
+}
+
 // The chrome pills under a point, or ROLE_NONE.
 static int pill_at(float px, float py)
 {
 	if (cv("touch_con_visible", 0) && hit_rect(px, py, cv("touch_con_x", 0.090f), cv("touch_con_y", 0.948f), cv("touch_con_size", 0.060f), cv("touch_con_aspect", 2.9f), 1.20f))
 		return ROLE_CON;
-	if (cv("touch_pause_visible", 1) && hit_rect(px, py, cv("touch_pause_x", 0.655f), cv("touch_pause_y", 0.088f), cv("touch_pause_size", 0.060f), cv("touch_pause_aspect", 2.4f), 1.20f))
+	if (cv("touch_pause_visible", 1) && (topbar_valid ? topbar_hit(&topbar.menu, px, py) : hit_rect(px, py, cv("touch_pause_x", 0.655f), cv("touch_pause_y", 0.088f), cv("touch_pause_size", 0.060f), cv("touch_pause_aspect", 2.4f), 1.20f)))
 		return ROLE_PAUSE;
-	if (cv("touch_chat_visible", 1) && hit_rect(px, py, cv("touch_chat_x", 0.889f), cv("touch_chat_y", 0.088f), cv("touch_chat_size", 0.060f), cv("touch_chat_aspect", 2.4f), 1.20f))
+	if (cv("touch_chat_visible", 1) && (topbar_valid ? topbar_hit(&topbar.chat, px, py) : hit_rect(px, py, cv("touch_chat_x", 0.889f), cv("touch_chat_y", 0.088f), cv("touch_chat_size", 0.060f), cv("touch_chat_aspect", 2.4f), 1.20f)))
 		return ROLE_CHAT;
-	if (cv("touch_scores_visible", 1) && hit_rect(px, py, cv("touch_scores_x", 0.772f), cv("touch_scores_y", 0.088f), cv("touch_scores_size", 0.060f), cv("touch_scores_aspect", 2.4f), 1.20f))
+	if (cv("touch_scores_visible", 1) && (topbar_valid ? topbar_hit(&topbar.score, px, py) : hit_rect(px, py, cv("touch_scores_x", 0.772f), cv("touch_scores_y", 0.088f), cv("touch_scores_size", 0.060f), cv("touch_scores_aspect", 2.4f), 1.20f)))
 		return ROLE_SCORES;
 	return ROLE_NONE;
 }
@@ -2020,9 +2035,9 @@ static int cursor_pill_at(float px, float py)
 	// match end: MENU is in the corner (draw_endmenu), and takes its finger first
 	if (TouchMode_IsMatchEnd(TouchHudMode_Current()->mode))
 		return ROLE_NONE;
-	if (cv("touch_pause_visible", 1) && hit_rect(px, py, cv("touch_pause_x", 0.655f), cv("touch_pause_y", 0.088f), cv("touch_pause_size", 0.060f), cv("touch_pause_aspect", 2.4f), 1.20f))
+	if (cv("touch_pause_visible", 1) && (topbar_valid ? topbar_hit(&topbar.menu, px, py) : hit_rect(px, py, cv("touch_pause_x", 0.655f), cv("touch_pause_y", 0.088f), cv("touch_pause_size", 0.060f), cv("touch_pause_aspect", 2.4f), 1.20f)))
 		return ROLE_PAUSE;
-	if (cv("touch_chat_visible", 1) && hit_rect(px, py, cv("touch_chat_x", 0.889f), cv("touch_chat_y", 0.088f), cv("touch_chat_size", 0.060f), cv("touch_chat_aspect", 2.4f), 1.20f))
+	if (cv("touch_chat_visible", 1) && (topbar_valid ? topbar_hit(&topbar.chat, px, py) : hit_rect(px, py, cv("touch_chat_x", 0.889f), cv("touch_chat_y", 0.088f), cv("touch_chat_size", 0.060f), cv("touch_chat_aspect", 2.4f), 1.20f)))
 		return ROLE_CHAT;
 	return ROLE_NONE;
 }
@@ -2696,6 +2711,11 @@ static void draw_pill(const char *xk, float dx, const char *yk, float dy, const 
 	float cx, cy, hx, hy;
 	widget_center(cv(xk, dx), cv(yk, dy), &cx, &cy);
 	widget_half(cv(sk, ds), cv(ak, da), &hx, &hy);
+	if (topbar_valid && (!strcmp(sk, "touch_pause_size") || !strcmp(sk, "touch_scores_size") || !strcmp(sk, "touch_chat_size")))
+	{
+		const touchbar_rect_t *r = !strcmp(sk, "touch_pause_size") ? &topbar.menu : !strcmp(sk, "touch_scores_size") ? &topbar.score : &topbar.chat;
+		cx = r->x + r->w * 0.5f; cy = r->y + r->h * 0.5f; hx = r->w * 0.5f; hy = r->h * 0.5f;
+	}
 	widget_chrome_pill(cx, cy, hx, hy, label, pressed, a, C_ACCENT);
 }
 
@@ -3383,6 +3403,11 @@ static void rect_pill(const char *name, const char *xk, float dx, const char *yk
 	float cx, cy, hx, hy;
 	widget_center(cv(xk, dx), cv(yk, dy), &cx, &cy);
 	widget_half(cv(sk, ds), cv(ak, da), &hx, &hy);
+	if (topbar_valid && (!strcmp(sk, "touch_pause_size") || !strcmp(sk, "touch_scores_size") || !strcmp(sk, "touch_chat_size")))
+	{
+		const touchbar_rect_t *r = !strcmp(sk, "touch_pause_size") ? &topbar.menu : !strcmp(sk, "touch_scores_size") ? &topbar.score : &topbar.chat;
+		cx = r->x + r->w * 0.5f; cy = r->y + r->h * 0.5f; hx = r->w * 0.5f; hy = r->h * 0.5f;
+	}
 	rect_box(name, cx, cy, hx, hy);
 }
 
