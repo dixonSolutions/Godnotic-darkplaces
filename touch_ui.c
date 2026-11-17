@@ -437,6 +437,17 @@ static int TouchUI_KeysContext(void)
 	return (vid_touchscreen.integer ? 2 : 0) | (VID_HasKeyboard() ? 1 : 0);
 }
 
+/* Android raises its IME from vid_sdl.c. The other builds have no system
+ * on-screen keyboard, so the sheet's own keys are the only ones there. */
+static qbool TouchUI_SystemKeys(void)
+{
+#if TOUCHUI_SYSTEM_KEYS_ONLY
+	return true;
+#else
+	return false;
+#endif
+}
+
 qbool TouchUI_KeysShown(touchui_sheet_t kind)
 {
 	int ctx;
@@ -448,9 +459,12 @@ qbool TouchUI_KeysShown(touchui_sheet_t kind)
 		touchui_keys_override = -1;
 	if (touchui_keys_override >= 0)
 		return touchui_keys_override != 0;
-	/* The system keyboard is the one for text entry, in landscape too, so the
-	 * sheet does not put its own keys over it; KEYBOARD opens them. */
-	return false;
+	/* The system keyboard first. Where the platform has none, the sheet's keys
+	 * are the fallback, so text entry is never impossible; with a keyboard
+	 * attached they stay out of the way. KEYBOARD overrides either way. */
+	if (TouchUI_SystemKeys())
+		return false;
+	return !VID_HasKeyboard();
 }
 
 /*
@@ -520,13 +534,18 @@ static qbool TouchUI_MenuKeysWanted(void)
 		return true;
 	if (touch_menu_keyboard.integer == 2 || TOUCHUI_SYSTEM_KEYS_ONLY)
 	{
-		/* Automatic is the system keyboard on Android too: the IME is what a
-		 * field on a phone raises, input methods and all. An archived 0 from a
-		 * build before the default changed gets the same. */
-		return false;
+		/* The system keyboard, with the IME's input methods. A build without one
+		 * (Linux, the web) falls back to the engine's keys rather than leaving a
+		 * field that cannot be typed into. An archived 0 from before the default
+		 * changed gets the same. */
+		if (TouchUI_SystemKeys())
+			return false;
+		return !VID_HasKeyboard();
 	}
 	/* A keyboard to type on: no keys over the menu. */
 	if (VID_HasKeyboard())
+		return false;
+	if (TouchUI_SystemKeys())
 		return false;
 	return TouchUI_LatinLocale();
 }
