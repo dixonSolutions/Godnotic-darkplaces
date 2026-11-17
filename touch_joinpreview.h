@@ -22,6 +22,15 @@
 // ends.
 
 qbool TouchJoinPreview_Active(void);
+// True while a preview frame wants its entities: the caller links the world, the
+// map's static entities and the network entities into the scene (cl_main.c
+// CL_UpdateWorld). No prediction, no CSQC.
+qbool TouchJoinPreview_WantsEntities(void);
+// A baseline of entity `entnum` arrived during the signon: until the first real
+// update of it would be ignored by the entity relink (cl_ents.c marks entities
+// active only on updates), so mark it active for the preview. No effect outside
+// a signon.
+void TouchJoinPreview_Baseline(int entnum);
 // True when this frame is a preview: sets the scene and camera for the
 // caller's world render (cl_screen.c SCR_DrawScreen). False during the
 // signon's last step, where the normal view draws.

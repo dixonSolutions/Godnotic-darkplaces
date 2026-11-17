@@ -36,6 +36,7 @@ primary, no lead, no switching.
 #include "touch_hud.h"
 #include "touch_aim.h"
 #include "touch_weapons.h"
+#include "touch_aim_input.h"
 #include "touch_hook.h"
 #include "touch_tactics.h"
 #include "touch_assist.h"
@@ -144,7 +145,7 @@ cvar_t cl_touch_aim_dumptracks = {CF_CLIENT, "cl_touch_aim_dumptracks", "0",
 cvar_t cl_touch_aim_debug = {CF_CLIENT, "cl_touch_aim_debug", "0",
 	"Print auto-shoot and aim-assist decisions to the console: target, weapon, fire mode and why, lead, switches, rockets (2 = also teammates under the crosshair)"};
 cvar_t cl_touch_loser = {CF_CLIENT | CF_ARCHIVE, "cl_touch_loser", "0",
-	"Development: enable all touch auto-shoot, aim assist, ESP and wallhack helpers on a desktop machine (no touch screen). Off by default"};
+	"Legacy compatibility setting; aim helpers now work with every input device"};
 
 // Engine -> CSQC: whether auto-shoot is firing (the port's FIRE button glows),
 // and the look multiplier the port's touch_look.qc applies (aim friction).
@@ -629,15 +630,6 @@ static qbool is_spectator_slot(int n)
 const char *TouchAim_BlockReason(void)
 {
 	int me = cl.realplayerentity;
-	// Touch mode only, unless the development "loser" toggle is on, which lets
-	// the same helpers run on a desktop machine for testing.
-	if (!cl_touch_loser.integer)
-	{
-		if (!vid_touchscreen.integer)
-			return "vid_touchscreen is 0 (keyboard or mouse in use)";
-		if (vid_touchscreen_mouselook.integer)
-			return "a mouse is aiming next to the touch controls";
-	}
 	if (cls.state != ca_connected || cls.signon != SIGNONS || cls.demoplayback)
 		return "not in a live game";
 	if (key_dest != key_game || key_consoleactive)
@@ -3035,6 +3027,9 @@ static void aim_frame(void)
 		aim_touch = cl_touch_hud_state.integer > 0;
 	else
 		aim_touch = false;
+	// Keyboard turns and grabbed mouse motion are deliberate aim input too.
+	// In desk mode movement and manual fire can also engage the helper.
+	aim_touch = TouchAim_InputActive(aim_touch, vid_touchscreen.integer != 0, vid_touchscreen_mouselook.integer != 0, turn_mag, manual);
 
 	// the fire whose flight the aim leads: last decision's mode
 	hitscan_lag = 0;

@@ -20,6 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // cl_parse.c  -- parse a message received from the server
 
 #include "quakedef.h"
+#include "touch_joinpreview.h" // Touch: baselines of a join preview
 #include "cdaudio.h"
 #include "cl_collision.h"
 #include "csprogs.h"
@@ -3700,6 +3701,7 @@ void CL_ParseServerMessage(void)
 				if (i >= cl.max_entities)
 					CL_ExpandEntities(i);
 				CL_ParseBaseline(cl.entities + i, false);
+				TouchJoinPreview_Baseline(i); // Touch: a player in the join preview before its first update
 				break;
 			case qw_svc_spawnstatic:
 				CL_ParseStatic(false);
@@ -4162,6 +4164,7 @@ void CL_ParseServerMessage(void)
 				if (i >= cl.max_entities)
 					CL_ExpandEntities(i);
 				CL_ParseBaseline (cl.entities + i, false);
+				TouchJoinPreview_Baseline(i); // Touch: a player in the join preview before its first update
 				break;
 			case svc_spawnbaseline2:
 				i = (unsigned short) MSG_ReadShort(&cl_message);
@@ -4170,6 +4173,7 @@ void CL_ParseServerMessage(void)
 				if (i >= cl.max_entities)
 					CL_ExpandEntities(i);
 				CL_ParseBaseline (cl.entities + i, true);
+				TouchJoinPreview_Baseline(i); // Touch: a player in the join preview before its first update
 				break;
 			case svc_spawnstatic:
 				CL_ParseStatic (false);

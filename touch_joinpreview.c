@@ -82,23 +82,47 @@ qbool TouchJoinPreview_Drew(void)
 	return drew;
 }
 
-// The world entity and the scene the renderer expects of a game frame: during
-// a signon CL_UpdateWorld leaves the entity list empty, so the world can be
-// drawn from it as it stands.
+// CL_UpdateWorld's Touch hook links the world, the map's static entities and the
+// network entities for a preview frame. A draw that happens earlier than that
+// hook (a loading-screen redraw from inside the signon) only has the world; it
+// gets a world entity of its own so the map still shows.
 static void JP_SetScene(void)
 {
-	entity_t *world = &cl.entities[0];
-	r_refdef.scene.numentities = 0;
-	r_refdef.scene.numlights = 0;
+	if (!r_refdef.scene.worldentity && cl.worldmodel)
+	{
+		entity_t *world = &cl.entities[0];
+		world->render.model = cl.worldmodel;
+		world->render.matrix = identitymatrix;
+		world->render.flags = RENDER_SHADOW | (r_fullbright.integer ? 0 : RENDER_LIGHT);
+		world->render.alpha = 1;
+		VectorSet(world->render.colormod, 1, 1, 1);
+		VectorSet(world->render.glowmod, 1, 1, 1);
+		r_refdef.scene.worldentity = &world->render;
+	}
+	if (!r_refdef.scene.worldmodel)
+		r_refdef.scene.worldmodel = cl.worldmodel;
 	r_refdef.scene.time = cl.time;
-	world->render.model = cl.worldmodel;
-	world->render.matrix = identitymatrix;
-	world->render.flags = RENDER_SHADOW | (r_fullbright.integer ? 0 : RENDER_LIGHT);
-	world->render.alpha = 1;
-	VectorSet(world->render.colormod, 1, 1, 1);
-	VectorSet(world->render.glowmod, 1, 1, 1);
-	r_refdef.scene.worldentity = &world->render;
-	r_refdef.scene.worldmodel = cl.worldmodel;
+}
+
+qbool TouchJoinPreview_WantsEntities(void)
+{
+	return TouchJoinPreview_Active();
+}
+
+// The entity relink takes a baseline for an entity that is drawn only once an
+// update marks it active (cl_ents.c). During the signon a server sends baselines
+// and no updates, so the players to follow and to show would be missing from
+// every preview frame without this. Nothing is marked outside a signon, and the
+// first real update (or the signon's end) takes over anyway.
+void TouchJoinPreview_Baseline(int entnum)
+{
+	if (!touch_join_preview.integer)
+		return;
+	if (cls.state != ca_connected || cls.signon >= SIGNONS)
+		return;
+	if (entnum <= 0 || entnum >= MAX_EDICTS || entnum >= cl.max_entities)
+		return;
+	cl.entities_active[entnum] = true;
 }
 
 // Xonotic's player models are models/player/*; anything else a server sends

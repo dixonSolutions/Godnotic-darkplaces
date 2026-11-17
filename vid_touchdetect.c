@@ -643,7 +643,7 @@ void VID_NoteKeyboardUse(void)
 }
 
 // Real (not touch-emulated) pointer motion or a click. It confirms the mouse
-// or touchpad the system lists, so the game can aim with it next to the
+// or touchpad, so the game can aim with it next to the
 // touch controls. It never hides them: a mouse says nothing about a
 // keyboard, and fingers keep working alongside it.
 void VID_NoteMouseUse(float travel, qbool press)
@@ -659,10 +659,10 @@ void VID_NoteMouseUse(float travel, qbool press)
 		vid_mouse_last = host.realtime;
 		return;
 	}
+#ifdef VID_LINUX_PROBES
 	// X11 does not mark the pointer events it emulates from a finger.
 	if (host.realtime - vid_touch_last < VID_TOUCH_QUIET)
 		return;
-#ifdef VID_LINUX_PROBES
 	// Wayland hands a pen to SDL as a mouse. Catch up on the pen's own
 	// events before counting this as a mouse.
 	if (vid_pens_open() && vid_linux_poll())
@@ -683,25 +683,29 @@ void VID_NoteMouseUse(float travel, qbool press)
 		if (!vid_presence_get()->mouse)
 			return;
 	}
-#else
+#elif !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
 	if (!vid_presence_get()->mouse)
 		return;
 #endif
 	vid_mouse_confirmed = true;
 	vid_mouse_last = host.realtime;
-	Con_Printf("Input: mouse in use (the system lists one)\n");
+	Con_Printf("Input: mouse in use\n");
 }
 
-// A mouse or touchpad the system lists aims in the game once it has been
+// A mouse or touchpad aims in the game once it has been
 // moved or clicked, and until the fingers have been the only pointer for
 // VID_MOUSE_HOLD seconds. Presence alone is not enough: tablets list built-in
 // pointer devices nobody uses (a Galaxy Tab's sec_touchpad, a pen, a phone
 // browser reporting a fine pointer), and a mouse that "aims" without being
-// used takes the look from the fingers and turns off the touch aim helpers.
+// used takes the look from the fingers.
 qbool VID_TouchMouseConfirmed(void)
 {
-	if (!vid_presence_get()->mouse || !vid_mouse_confirmed)
+	if (!vid_mouse_confirmed)
 		return false;
+#if !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+	if (!vid_presence_get()->mouse)
+		return false;
+#endif
 	return vid_mouse_last >= vid_touch_last || host.realtime - vid_mouse_last < VID_MOUSE_HOLD;
 }
 

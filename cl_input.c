@@ -688,6 +688,7 @@ void CL_Input (void)
 		}
 		else if ((in_mlook.state & 1) || freelook.integer)
 		{
+			modulatedsensitivity *= TouchAim_LookScale(); // Touch: apply aim friction to mouse look
 			// mouselook, lookstrafe causes turning to become strafing
 			V_StopPitchDrift();
 			if (lookstrafe.integer)

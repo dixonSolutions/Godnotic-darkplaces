@@ -20,6 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // cl_main.c  -- client main loop
 
 #include "quakedef.h"
+#include "touch_joinpreview.h" // Touch: entities for a join preview frame
 #include "touch_nativefe.h" // Touch: native front end
 #include "cl_collision.h"
 #include "cl_video.h"
@@ -2102,6 +2103,16 @@ void CL_UpdateWorld(void)
 		}
 
 		// decals, particles, and explosions will be updated during rneder
+	}
+
+	// Touch: a join preview draws the entities the signon has sent so far: the
+	// world, the map's static entities and the players (touch_joinpreview.c)
+	if (TouchJoinPreview_WantsEntities())
+	{
+		CL_UpdateNetworkEntities();
+		CL_RelinkWorld();
+		CL_RelinkStaticEntities();
+		CL_RelinkNetworkEntities();
 	}
 
 	r_refdef.scene.time = cl.time;

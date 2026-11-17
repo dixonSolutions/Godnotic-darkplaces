@@ -394,9 +394,9 @@ static void TouchHudState_f(cmd_state_t *cmd)
 	// what the controls are doing to the player, for the input tests
 	// (scripts/test-touch-controls.sh): view angles, buttons, the frame's move
 	{
-		extern kbutton_t in_attack, in_jump;
-		Con_Printf("TOUCHFEEL yaw=%.3f pitch=%.3f attack=%d jump=%d fwd=%.0f side=%.0f vz=%.0f onground=%d\n",
-			cl.viewangles[YAW], cl.viewangles[PITCH], in_attack.state & 1, in_jump.state & 1,
+		extern kbutton_t in_attack, in_button3, in_jump;
+		Con_Printf("TOUCHFEEL yaw=%.3f pitch=%.3f attack=%d attack2=%d jump=%d fwd=%.0f side=%.0f vz=%.0f onground=%d\n",
+			cl.viewangles[YAW], cl.viewangles[PITCH], in_attack.state & 1, in_button3.state & 1, in_jump.state & 1,
 			cl.cmd.forwardmove, cl.cmd.sidemove, cl.velocity[2], cl.onground);
 	}
 	if (Cmd_Argc(cmd) > 1 && !strcmp(Cmd_Argv(cmd, 1), "rects"))
