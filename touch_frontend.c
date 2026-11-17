@@ -1042,6 +1042,11 @@ static void fe_play(cmd_state_t *cmd)
 		return;
 	}
 	Cbuf_AddText(cmd_local, "\ndisconnect; wait; g_campaign 0\n");
+	// Match the UIB create flow: the local join dialog owns the choice, and
+	// the server Welcome dialog must not reopen the paused menu over it.
+	Cbuf_AddText(cmd_local, (cvar_int("vid_touchscreen") || cvar_int("vid_touchscreen_detected") || cvar_int("touch_join_dialog_auto") >= 2)
+		? "sv_spectate 1\n" : "sv_spectate 0\n");
+	fe_set_cvar("_menu_welcome_dialog_available", "0");
 	Cbuf_AddText(cmd_local, va(line, sizeof(line), "maxplayers %d\nsv_public 0\nbot_number %d\n", max(bots + 1, 2), bots));
 	if (*sk)
 		Cbuf_AddText(cmd_local, va(line, sizeof(line), "skill %d\n", bound(0, atoi(sk), 10)));

@@ -190,6 +190,9 @@ static void publish(void)
 }
 
 static touchjoindlg_t join_dlg = {1, TOUCHJOINDLG_TRIES, 0, 0};
+static touchlocaljoin_t local_join;
+static char local_join_command[128];
+static qbool join_dialog_scheduled;
 static char join_dlg_map[64];
 static qbool join_dlg_welcome;   // the game's own Welcome dialog (Join! / Spectate) came up for this connection
 
@@ -210,7 +213,7 @@ static qbool join_dialog_here(void)
 // A join that has not completed: the timeout does not reveal the reason.
 static void join_refused_notice(void)
 {
-	SCR_CenterPrint("Joining has not completed yet.\nMENU > Join game tries again.");
+	SCR_CenterPrint("Joining has not completed yet.\nMENU > Join game opens the join dialog.");
 }
 
 void TouchHudMode_Update(void)
@@ -219,6 +222,11 @@ void TouchHudMode_Update(void)
 	int last_mode = current.mode;
 	read_inputs(&in);
 	current = TouchMode_Derive(&in);
+	if (TouchLocalJoin_Frame(&local_join, current.mode, in.join_queued, host.realtime))
+	{
+		Cbuf_AddText(cmd_local, local_join_command);
+		Cbuf_AddText(cmd_local, "\n");
+	}
 	current_target[0] = 0;
 	if (current.mode == TOUCHMODE_FOLLOWING || current.mode == TOUCHMODE_OUT)
 	{
@@ -256,7 +264,8 @@ void TouchHudMode_Update(void)
 	{
 	case TOUCHJOINDLG_OPEN:
 		Con_DPrintf("Touch HUD: observer at match start: the join dialog\n");
-		Cbuf_AddText(cmd_local, "touch_join_dialog\n");
+		join_dialog_scheduled = true;
+		Cbuf_AddText(cmd_local, "touch_join_dialog auto\n");
 		break;
 	case TOUCHJOINDLG_JOIN:
 		Con_DPrintf("Touch HUD: a game hosted here: joining\n");
@@ -287,6 +296,14 @@ const char *TouchHudMode_Target(void)
 static void TouchJoinDialog_f(cmd_state_t *cmd)
 {
 	TouchHudMode_Update();
+	// An automatic open can already be queued when the player answers by
+	// another route; do not reopen the menu and pause the listen server.
+	if (!strcmp(Cmd_Argv(cmd, 1), "auto"))
+	{
+		if (!join_dialog_scheduled)
+			return;
+		join_dialog_scheduled = false;
+	}
 	if (current.mode == TOUCHMODE_OFF || TouchMode_IsMatchEnd(current.mode))
 	{
 		Con_Printf("touch_join_dialog: not in a match\n");
@@ -321,6 +338,11 @@ static void TouchJoin_f(cmd_state_t *cmd)
 		return;
 	}
 	TouchJoinDlg_Answered(&join_dlg);
+	local_join.remaining = 0;
+	join_dialog_scheduled = false;
+	// A listen server pauses while the menu has input. Close it before the
+	// choice reaches the server, including when invoked by a native renderer.
+	Cbuf_AddText(cmd_local, "togglemenu 0\n");
 	if (!strcmp(choice, "spectate"))
 	{
 		// already watching: nothing to send, the dialog just closes
@@ -328,7 +350,14 @@ static void TouchJoin_f(cmd_state_t *cmd)
 			return;
 	}
 	else if (TouchMode_IsSpectating(current.mode))
+	{
 		TouchSpec_JoinSend(&join_req, host.realtime);
+		if (sv.active)
+		{
+			dp_strlcpy(local_join_command, text, sizeof(local_join_command));
+			TouchLocalJoin_Start(&local_join, host.realtime);
+		}
+	}
 	Con_DPrintf("Touch HUD: join dialog: %s -> %s\n", choice, text);
 	Cbuf_AddText(cmd_local, text);
 	Cbuf_AddText(cmd_local, "\n");
@@ -337,6 +366,8 @@ static void TouchJoin_f(cmd_state_t *cmd)
 void TouchHudMode_Reset(void)
 {
 	memset(&join_req, 0, sizeof(join_req));
+	memset(&local_join, 0, sizeof(local_join));
+	join_dialog_scheduled = false;
 }
 
 static void TouchAction_f(cmd_state_t *cmd)
@@ -371,6 +402,7 @@ static void TouchAction_f(cmd_state_t *cmd)
 	}
 	if (act == TOUCHACT_SPECTATE)
 	{
+		local_join.remaining = 0;
 		TouchJoinDlg_Answered(&join_dlg);
 		Cbuf_AddText(cmd_local, "togglemenu 0\n");
 	}

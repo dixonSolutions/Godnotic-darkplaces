@@ -439,6 +439,31 @@ static inline const char *TouchJoinDlg_Command(const char *choice, int teams)
 	return "";
 }
 
+// A local server can receive the choice before its one-second spectator
+// grace period ends. Retry that same choice briefly once it can be accepted.
+typedef struct touchlocaljoin_s
+{
+	int remaining;
+	double next;
+} touchlocaljoin_t;
+
+static inline void TouchLocalJoin_Start(touchlocaljoin_t *j, double now)
+{
+	j->remaining = 4;
+	j->next = now + 0.5;
+}
+
+static inline int TouchLocalJoin_Frame(touchlocaljoin_t *j, int mode, int queued, double now)
+{
+	if (mode == TOUCHMODE_OFF || mode == TOUCHMODE_PLAYING || TouchMode_IsMatchEnd(mode) || queued)
+		j->remaining = 0;
+	if (!j->remaining || !TouchMode_IsSpectating(mode) || now < j->next)
+		return 0;
+	--j->remaining;
+	j->next = now + 0.5;
+	return 1;
+}
+
 // ---------------------------------------------------------------------------
 // Sizes in density-independent pixels: primary actions 56-64 dp, secondary
 // 46-48 dp, never a touch target under 48 dp.
