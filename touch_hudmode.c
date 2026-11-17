@@ -46,7 +46,14 @@ The port's CSQC adds what only it can read (touch_mode.qc):
 #include "touch_hudmode.h"
 
 extern qbool cl_touch_csqc_active;
+static char pending_join[128];   // a choice made over the join preview
+static double pending_join_at;
 
+#include "touch_joinpreview.h" // Touch: the world while a join loads (the join dialog opens over it)
+
+static cvar_t pub_menu_paused = {CF_CLIENT | CF_READONLY, "_touch_menu_paused", "0", "the local server is actually paused; read-only"};
+static cvar_t pub_join_preview = {CF_CLIENT | CF_READONLY, "_touch_join_preview", "0", "the map is drawable while a join finishes (touch_joinpreview.c); read-only"};
+static cvar_t pub_menu_scrim = {CF_CLIENT | CF_READONLY, "_touch_menu_scrim", "0", "how dark the menu overlay dims the live game, percent (0: menu closed); read-only"};
 static cvar_t pub_mode = {CF_CLIENT | CF_READONLY, "_touch_hud_mode", "off", "the in-match HUD mode (touch_hudmode.c); read-only"};
 static cvar_t pub_target = {CF_CLIENT | CF_READONLY, "_touch_hud_target", "", "the followed player's name while following; read-only"};
 static cvar_t pub_flags = {CF_CLIENT | CF_READONLY, "_touch_hud_flags", "0", "TOUCHMODE_F_* bits: 1 warmup, 2 ready wanted, 4 teams, 8 round live, 16 carrying; read-only"};
@@ -69,6 +76,7 @@ static cvar_t pub_act[TOUCHACT_COUNT] = {
 };
 static cvar_t touch_join_dialog_auto = {CF_CLIENT | CF_ARCHIVE, "touch_join_dialog_auto", "1", "Godnotic: open Xonotic's join dialog (auto-select, the teams, spectate) by itself for an observer when a match starts: 0 never (MENU > Join game opens it), 1 on a device with a touchscreen, 2 always"};
 static cvar_t touch_local_autojoin = {CF_CLIENT | CF_ARCHIVE, "touch_local_autojoin", "1", "Godnotic: join a local campaign automatically when there is no team to pick"};
+static cvar_t touch_always_autojoin = {CF_CLIENT | CF_ARCHIVE, "touch_always_autojoin", "0", "Godnotic: automatically join matches instead of asking for a team or spectator"};
 static cvar_t hint_round = {CF_CLIENT, "_touch_hint_round", "0", "set by the port's CSQC: a round-based game with a round under way"};
 static cvar_t hint_carry = {CF_CLIENT, "_touch_hint_carry", "0", "set by the port's CSQC: carrying a flag, key or ball"};
 static cvar_t hint_queued = {CF_CLIENT, "_touch_hint_queued", "0", "set by the port's CSQC: the server queued our join"};
@@ -181,6 +189,9 @@ static void publish(void)
 		else if (st == TOUCHACT_CONFIRM)
 			dp_strlcat(actions, ":confirm", sizeof(actions));
 	}
+	set_number(&pub_menu_paused, TouchMode_MenuPaused(sv.active, host.paused, sv.paused));
+	set_number(&pub_join_preview, TouchJoinPreview_Active());
+	set_number(&pub_menu_scrim, TouchMode_MenuScrim(TouchMode_MenuOverlay(key_dest != key_game), TouchMode_MenuPaused(sv.active, host.paused, sv.paused)));
 	set_string(&pub_mode, TouchMode_Name(current.mode));
 	set_string(&pub_target, current_target);
 	set_number(&pub_flags, current.flags);
@@ -195,6 +206,48 @@ static char local_join_command[128];
 static qbool join_dialog_scheduled;
 static char join_dlg_map[64];
 static qbool join_dlg_welcome;   // the game's own Welcome dialog (Join! / Spectate) came up for this connection
+
+// Sends a join choice now: the menu is closed first (a listen server pauses
+// while the menu has input), then the choice reaches the server.
+static void join_send(const char *text)
+{
+	if (!text[0])
+		return;
+	Cbuf_AddText(cmd_local, "togglemenu 0\n");
+	if (TouchMode_IsSpectating(current.mode))
+	{
+		TouchSpec_JoinSend(&join_req, host.realtime);
+		if (sv.active)
+		{
+			dp_strlcpy(local_join_command, text, sizeof(local_join_command));
+			TouchLocalJoin_Start(&local_join, host.realtime);
+		}
+	}
+	Cbuf_AddText(cmd_local, text);
+	Cbuf_AddText(cmd_local, "\n");
+}
+
+// A choice made in the join dialog. Over the join preview the client cannot
+// send it yet (the signon has not finished), so it is kept and sent by the
+// first frame that can, rather than lost.
+static void join_choice(const char *text)
+{
+	if (!text[0])
+		return;
+	TouchJoinDlg_Answered(&join_dlg);
+	join_dialog_scheduled = false;
+	local_join.remaining = 0;
+	if (current.mode == TOUCHMODE_OFF)
+	{
+		dp_strlcpy(pending_join, text, sizeof(pending_join));
+		pending_join_at = host.realtime;
+		Cbuf_AddText(cmd_local, "togglemenu 0\n");
+		return;
+	}
+	join_send(text);
+}
+
+
 
 static qbool screen_free(void)
 {
@@ -227,6 +280,19 @@ void TouchHudMode_Update(void)
 		Cbuf_AddText(cmd_local, local_join_command);
 		Cbuf_AddText(cmd_local, "\n");
 	}
+	if (pending_join[0])
+	{
+		// a team picked over the join preview: sent the first frame the client can
+		if (cls.state != ca_connected || host.realtime - pending_join_at > 20.0)
+			pending_join[0] = 0;
+		else if (TouchMode_IsSpectating(current.mode))
+		{
+			char text[128];
+			dp_strlcpy(text, pending_join, sizeof(text));
+			pending_join[0] = 0;
+			join_send(text);
+		}
+	}
 	current_target[0] = 0;
 	if (current.mode == TOUCHMODE_FOLLOWING || current.mode == TOUCHMODE_OUT)
 	{
@@ -246,7 +312,7 @@ void TouchHudMode_Update(void)
 	if (in.in_match && strcmp(join_dlg_map, cl.worldbasename))
 	{
 		dp_strlcpy(join_dlg_map, cl.worldbasename, sizeof(join_dlg_map));
-		TouchJoinDlg_Frame(&join_dlg, TOUCHMODE_OFF, 0, 0, 0, 0, 0, host.realtime);
+		TouchJoinDlg_Frame(&join_dlg, TOUCHMODE_OFF, 0, 0, 0, 0, 0, 0, 0, host.realtime);
 		if (join_dlg_welcome)
 			TouchJoinDlg_Answered(&join_dlg);
 		join_dlg_welcome = false;
@@ -257,10 +323,13 @@ void TouchHudMode_Update(void)
 		if (cls.state != ca_connected)
 			join_dlg_welcome = false;
 	}
+	// the join dialog also comes up over the join preview, before the player is
+	// made an observer: TouchJoinDlg_Frame's joining flag
+	qbool joining = TouchJoinPreview_Active() && cls.state == ca_connected;
 	switch (TouchJoinDlg_Frame(&join_dlg, current.mode, current.flags,
 		sv.active && touch_local_autojoin.integer, Cvar_VariableValue(&cvars_all, "g_campaign", ~0) == 0 ? 0 :
 		(Cvar_VariableValue(&cvars_all, "g_campaign_forceteam", ~0) >= 1 && Cvar_VariableValue(&cvars_all, "g_campaign_forceteam", ~0) <= 4 ? 2 : 1),
-		screen_free(), join_dialog_here(), host.realtime))
+		screen_free(), join_dialog_here(), touch_always_autojoin.integer, joining, host.realtime))
 	{
 	case TOUCHJOINDLG_OPEN:
 		Con_DPrintf("Touch HUD: observer at match start: the join dialog\n");
@@ -268,8 +337,8 @@ void TouchHudMode_Update(void)
 		Cbuf_AddText(cmd_local, "touch_join_dialog auto\n");
 		break;
 	case TOUCHJOINDLG_JOIN:
-		Con_DPrintf("Touch HUD: a game hosted here: joining\n");
-		Cbuf_AddText(cmd_local, "cmd join\n");
+		Con_DPrintf("Touch HUD: auto-join: joining\n");
+		join_choice((current.flags & TOUCHMODE_F_TEAMS) ? "cmd selectteam auto; cmd join" : "cmd join");
 		break;
 	default:
 		break;
@@ -304,7 +373,7 @@ static void TouchJoinDialog_f(cmd_state_t *cmd)
 			return;
 		join_dialog_scheduled = false;
 	}
-	if (current.mode == TOUCHMODE_OFF || TouchMode_IsMatchEnd(current.mode))
+	if ((current.mode == TOUCHMODE_OFF && !TouchJoinPreview_Active()) || TouchMode_IsMatchEnd(current.mode))
 	{
 		Con_Printf("touch_join_dialog: not in a match\n");
 		return;
@@ -332,35 +401,22 @@ static void TouchJoin_f(cmd_state_t *cmd)
 	const char *text;
 	TouchHudMode_Update();
 	text = TouchJoinDlg_Command(choice, (current.flags & TOUCHMODE_F_TEAMS) != 0);
-	if (!text[0] || current.mode == TOUCHMODE_OFF || TouchMode_IsMatchEnd(current.mode))
+	if (!text[0] || TouchMode_IsMatchEnd(current.mode)
+		|| (current.mode == TOUCHMODE_OFF && !TouchJoinPreview_Active()))
 	{
 		Con_Printf("touch_join <auto|red|blue|yellow|pink|spectate>, in a match; now: %s\n", pub_mode.string);
 		return;
 	}
-	TouchJoinDlg_Answered(&join_dlg);
-	local_join.remaining = 0;
-	join_dialog_scheduled = false;
-	// A listen server pauses while the menu has input. Close it before the
-	// choice reaches the server, including when invoked by a native renderer.
-	Cbuf_AddText(cmd_local, "togglemenu 0\n");
-	if (!strcmp(choice, "spectate"))
+	if (!strcmp(choice, "spectate") && TouchMode_IsSpectating(current.mode))
 	{
 		// already watching: nothing to send, the dialog just closes
-		if (TouchMode_IsSpectating(current.mode))
-			return;
-	}
-	else if (TouchMode_IsSpectating(current.mode))
-	{
-		TouchSpec_JoinSend(&join_req, host.realtime);
-		if (sv.active)
-		{
-			dp_strlcpy(local_join_command, text, sizeof(local_join_command));
-			TouchLocalJoin_Start(&local_join, host.realtime);
-		}
+		TouchJoinDlg_Answered(&join_dlg);
+		join_dialog_scheduled = false;
+		Cbuf_AddText(cmd_local, "togglemenu 0\n");
+		return;
 	}
 	Con_DPrintf("Touch HUD: join dialog: %s -> %s\n", choice, text);
-	Cbuf_AddText(cmd_local, text);
-	Cbuf_AddText(cmd_local, "\n");
+	join_choice(text);
 }
 
 void TouchHudMode_Reset(void)
@@ -368,6 +424,7 @@ void TouchHudMode_Reset(void)
 	memset(&join_req, 0, sizeof(join_req));
 	memset(&local_join, 0, sizeof(local_join));
 	join_dialog_scheduled = false;
+	pending_join[0] = 0;
 }
 
 static void TouchAction_f(cmd_state_t *cmd)
@@ -445,6 +502,9 @@ static void TouchHudState_f(cmd_state_t *cmd)
 void TouchHudMode_Init(void)
 {
 	int act;
+	Cvar_RegisterVariable(&pub_menu_paused);
+	Cvar_RegisterVariable(&pub_join_preview);
+	Cvar_RegisterVariable(&pub_menu_scrim);
 	Cvar_RegisterVariable(&pub_mode);
 	Cvar_RegisterVariable(&pub_target);
 	Cvar_RegisterVariable(&pub_flags);
@@ -455,6 +515,7 @@ void TouchHudMode_Init(void)
 		Cvar_RegisterVariable(&pub_act[act]);
 	Cvar_RegisterVariable(&touch_join_dialog_auto);
 	Cvar_RegisterVariable(&touch_local_autojoin);
+	Cvar_RegisterVariable(&touch_always_autojoin);
 	Cvar_RegisterVariable(&hint_round);
 	Cvar_RegisterVariable(&hint_carry);
 	Cvar_RegisterVariable(&hint_queued);

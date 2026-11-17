@@ -1,6 +1,7 @@
 
 #include "quakedef.h"
 #include "image.h"
+#include "touch_sky.h" // Touch: a sky the data set ships when the map's is missing
 
 // FIXME: fix skybox after vid_restart
 cvar_t r_sky = {CF_CLIENT | CF_ARCHIVE, "r_sky", "1", "enables sky rendering (black otherwise)"};
@@ -138,7 +139,11 @@ static int R_LoadSkyBox(void)
 	}
 
 	if (j == 3)
+	{
+		if (Touch_SkyFallback(skyname, sizeof(skyname))) // Touch: guaranteed sky instead of a black void
+			return R_LoadSkyBox();
 		return false;
+	}
 
 	if (developer_loading.integer)
 		Con_Printf("loading skybox \"%s\"\n", name);
@@ -468,6 +473,7 @@ void R_Sky_Init(void)
 	Cvar_RegisterVariable (&r_skyscroll1);
 	Cvar_RegisterVariable (&r_skyscroll2);
 	Cvar_RegisterVariable (&r_sky_scissor);
+	Touch_Sky_Init(); // Touch: r_sky_fallback, r_sky_fallback_name
 	memset(&skyboxskinframe, 0, sizeof(skyboxskinframe));
 	skyname[0] = 0;
 	R_RegisterModule("R_Sky", r_sky_start, r_sky_shutdown, r_sky_newmap, NULL, NULL);

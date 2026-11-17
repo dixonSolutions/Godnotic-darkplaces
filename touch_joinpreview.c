@@ -62,6 +62,8 @@ qbool TouchJoinPreview_Active(void)
 {
 	if (!touch_join_preview.integer)
 		return false;
+	if (key_dest != key_game)
+		return false;   // the in-match menu is an overlay: no preview camera under it
 	if (cls.state != ca_connected || cls.signon >= SIGNONS)
 		return false;
 	if (!scr_refresh.integer || vid_hidden)

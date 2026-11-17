@@ -38,6 +38,7 @@ foreground service while there is something to keep alive.
 
 #ifdef __ANDROID__
 #include <SDL.h>
+#include <jni.h>
 #include <EGL/egl.h>
 #include "libcurl.h"
 #include "touch_hud.h"
@@ -54,6 +55,8 @@ static EGLContext away_context = EGL_NO_CONTEXT;
 static qbool away_surfaceless;   // EGL can bind the context without a surface
 static qbool load_held, load_resume;
 static qbool netstate_busy;      // connected, joining or downloading
+extern cvar_t vid_orientation;
+static int applied_orientation = -1;
 void CL_ResumeHeldLoad(void);    // cl_parse.c
 
 // xt.vibrate for client mods (touch_lua.h): SDL's haptic device for the
@@ -89,6 +92,43 @@ void TouchAndroid_Init(void)
 {
 	SDL_SetHint(SDL_HINT_ANDROID_BLOCK_ON_PAUSE, "0");
 	TouchLua_VibrateHook = TA_Vibrate;
+}
+
+void TouchAndroid_Orientation(void)
+{
+	int mode = bound(0, vid_orientation.integer, 2);
+	JNIEnv *env;
+	jobject activity;
+	jclass cls;
+	jmethodID method;
+	if (mode == applied_orientation)
+		return;
+	SDL_SetHint(SDL_HINT_ORIENTATIONS, mode == 1 ? "LandscapeLeft LandscapeRight" : mode == 2 ? "Portrait PortraitUpsideDown" : "LandscapeLeft LandscapeRight Portrait PortraitUpsideDown");
+	env = (JNIEnv *)SDL_AndroidGetJNIEnv();
+	activity = (jobject)SDL_AndroidGetActivity();
+	if (!env || !activity)
+		return;
+	cls = (*env)->GetObjectClass(env, activity);
+	method = cls ? (*env)->GetMethodID(env, cls, "setRequestedOrientation", "(I)V") : NULL;
+	if (method)
+	{
+		/* ActivityInfo: FULL_SENSOR, SENSOR_LANDSCAPE, SENSOR_PORTRAIT. */
+		(*env)->CallVoidMethod(env, activity, method, mode == 1 ? 6 : mode == 2 ? 7 : 10);
+		if (!(*env)->ExceptionCheck(env))
+			applied_orientation = mode;
+	}
+	if ((*env)->ExceptionCheck(env))
+		(*env)->ExceptionClear(env);
+	if (cls) (*env)->DeleteLocalRef(env, cls);
+	(*env)->DeleteLocalRef(env, activity);
+}
+
+void TouchAndroid_OrientationWindowCreated(void)
+{
+	/* SDL may choose an orientation from the initial window dimensions even
+	 * when the hint permits both; restore the saved choice after creation. */
+	applied_orientation = -1;
+	TouchAndroid_Orientation();
 }
 
 void TouchAndroid_Background(qbool goaway)
@@ -266,6 +306,7 @@ static void wait_while_idle(void)
 
 void TouchAndroid_AfterEvents(void)
 {
+	TouchAndroid_Orientation();
 	if (away)
 		vid_hidden = true; // whatever window events came in meanwhile
 	publish_netstate();

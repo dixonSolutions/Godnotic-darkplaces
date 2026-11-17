@@ -104,6 +104,7 @@ static float screen_min(void) { return min(ui_w(), ui_h()); }
 static float widget_scale(void) { return max(0.01f, cv("touch_scale", 1.0f)); }
 static float ui_scale(void) { return screen_min() / UI_REF_SHORT_AXIS; }
 static float mirror_x(float nx) { return cv("touch_handedness", 0) ? 1.0f - nx : nx; }
+static float crouch_x(float nx) { return ui_w() < ui_h() ? nx - 0.04f : nx; }
 static void widget_center(float nx, float ny, float *cx, float *cy)
 {
 	*cx = mirror_x(nx) * ui_w();
@@ -131,6 +132,16 @@ static float cv(const char *name, float def);
 static float stick_radius(void)
 {
 	return max(widget_radius(cv("touch_move_size", 0.400f)), TOUCHDP_STICK_RADIUS * dp_units());
+}
+static void stick_center(float *cx, float *cy)
+{
+	float r = stick_radius();
+	widget_center(cv("touch_move_x", 0.170f), cv("touch_move_y", 0.680f), cx, cy);
+	if (ui_w() < ui_h() && 2 * r <= ui_w() && 2 * r <= ui_h())
+	{
+		*cx = bound(r, *cx, ui_w() - r);
+		*cy = bound(r, *cy, ui_h() - r);
+	}
 }
 static void widget_half(float nsize, float aspect, float *hx, float *hy)
 {
@@ -906,7 +917,10 @@ qbool TouchHUD_Active(void)
 	// The CSQC's pointer UI takes the fingers (TouchHUD_CursorFrame), as the
 	// port's own HUD steps aside for it.
 	// Match end (scoreboard, next-map vote): draw_endmenu owns the top bar.
-	return in_play() && !cl.csqc_wantsmousemove && !TouchMode_IsMatchEnd(TouchHudMode_Current()->mode);
+	// The in-match menu is an overlay on the live game: it owns the screen,
+	// so the touch controls step aside while it is open.
+	return key_dest == key_game && in_play() && !cl.csqc_wantsmousemove
+		&& !TouchMode_IsMatchEnd(TouchHudMode_Current()->mode);
 }
 
 // ---------------------------------------------------------------------------
@@ -1525,6 +1539,7 @@ static void extra_release(finger_t *f);
 #define ROLE_READY   307
 #define ROLE_RESPAWN 308
 #define ROLE_SPEC_ATTACK TOUCHSPEC_ROLE_ATTACK
+#define ROLE_SPEC_JOIN TOUCHSPEC_ROLE_JOIN
 #define ROLE_SPEC_PREV   TOUCHSPEC_ROLE_PREV
 #define ROLE_SPEC_FREE   TOUCHSPEC_ROLE_FREE
 #define ROLE_SPEC_UP     TOUCHSPEC_ROLE_UP
@@ -1569,7 +1584,7 @@ static int assign_role(float px, float py)
 		return ROLE_JUMP;
 	if (hoplock_shown() && hoplock_hit(px, py))
 		return ROLE_HOPLOCK;
-	if (cv("touch_crouch_visible", 1) && hit_circle(px, py, cv("touch_crouch_x", 0.700f), cv("touch_crouch_y", 0.885f), cv("touch_crouch_size", 0.080f), 1.10f))
+	if (cv("touch_crouch_visible", 1) && hit_circle(px, py, crouch_x(cv("touch_crouch_x", 0.700f)), cv("touch_crouch_y", 0.885f), cv("touch_crouch_size", 0.080f), 1.10f))
 		return ROLE_CROUCH;
 	if (weapon_button_shown() && hit_circle(px, py, cv("touch_weapon_x", 0.540f), cv("touch_weapon_y", 0.860f), cv("touch_weapon_size", 0.100f), 1.10f))
 		return ROLE_WEAPON;
@@ -1599,6 +1614,15 @@ static int assign_role(float px, float py)
 		return ROLE_IGNORED;
 	return ROLE_LOOK;
 }
+
+// The JOIN part: while a spectator may join -- signon finished, in the
+// match, not the end screen.
+static qbool spec_join_shown(void)
+{
+	return vid_touchscreen.integer && spec_hud() && !TouchMode_IsMatchEnd(hud_mode())
+		&& cls.state == ca_connected && cls.signon >= SIGNONS && !cl.intermission;
+}
+
 
 // The look (touch_feel.h): degrees per dp of finger travel, a gain that rises
 // with finger speed, and a smoothing that never loses travel.
@@ -2244,7 +2268,7 @@ void TouchHUD_Frame(void)
 			{
 				// The stick stays fixed; an off-centre landing immediately moves relative to it.
 				stick_held = true;
-				widget_center(cv("touch_move_x", 0.170f), cv("touch_move_y", 0.680f), &stick.cx, &stick.cy);
+				stick_center(&stick.cx, &stick.cy);
 			}
 			if (f->role == ROLE_JUMP)
 				hop_press_time = now;
@@ -2670,7 +2694,7 @@ static void draw_move_stick(float a)
 	const float *knob_rgb = C_RIM;
 	float knob_a = A_SURFACE_ACTIVE;
 	qbool active;
-	widget_center(cv("touch_move_x", 0.170f), cv("touch_move_y", 0.680f), &cx, &cy);
+	stick_center(&cx, &cy);
 	r = stick_radius();
 	if (r < 4)
 		return;
@@ -2703,7 +2727,8 @@ static void draw_move_stick(float a)
 static void draw_circle_widget(const char *xk, float dx, const char *yk, float dy, const char *sk, float ds, const char *label, qbool pressed, float a, const float *accent)
 {
 	float cx, cy;
-	widget_center(cv(xk, dx), cv(yk, dy), &cx, &cy);
+	float nx = cv(xk, dx);
+	widget_center(!strcmp(xk, "touch_crouch_x") ? crouch_x(nx) : nx, cv(yk, dy), &cx, &cy);
 	widget_button(cx, cy, widget_radius(cv(sk, ds)), label, pressed, a, accent);
 }
 
@@ -2788,6 +2813,18 @@ static void spec_bar_part(int part, float *cx, float *cy, float *hx, float *hy)
 		*hx = *hy * 2.2f;
 		*cx = bx;
 	}
+	else if (part == TOUCHSPEC_BAR_JOIN)
+	{
+		if (!spec_join_shown())
+		{
+			// not offered: off screen, so it is not drawn or hit
+			*cx = *cy = -1000;
+			*hx = *hy = 0;
+			return;
+		}
+		*hx = *hy * 1.15f;
+		*cx = bx + (*hy * 2.2f + *hy * 0.25f + *hy) + (*hy * 0.25f + *hx);
+	}
 	else
 	{
 		*hx = w * 0.5f;
@@ -2800,7 +2837,7 @@ static void spec_bar_part(int part, float *cx, float *cy, float *hx, float *hy)
 static void spec_fly_part(qbool up, float *cx, float *cy, float *r)
 {
 	float u = dp_units(), mx, my, mr;
-	widget_center(cv("touch_move_x", 0.170f), cv("touch_move_y", 0.680f), &mx, &my);
+	stick_center(&mx, &my);
 	mr = stick_radius();
 	*r = TOUCHDP_MIN_TARGET * 0.5f * u;
 	*cx = mx + (cv("touch_handedness", 0) ? -1 : 1) * (mr + *r * 1.6f);
@@ -2817,6 +2854,7 @@ static int spec_action_role(int action)
 	case TOUCHSPEC_ACT_FREE: return ROLE_SPEC_FREE;
 	case TOUCHSPEC_ACT_UP: return ROLE_SPEC_UP;
 	case TOUCHSPEC_ACT_DOWN: return ROLE_SPEC_DOWN;
+	case TOUCHSPEC_ACT_JOIN: return ROLE_SPEC_JOIN;
 	default: return ROLE_NONE;
 	}
 }
@@ -2888,6 +2926,12 @@ static void spec_frame(qbool *fire, qbool *fire2, qbool *jump)
 			exec_now("weapprev");
 			f->fired = true;
 		}
+		if (k.join)
+		{
+			// the same entry point as MENU > Join game
+			exec_now(cv("touch_join_dialog_auto", 1) != 0 ? "touch_join auto" : "touch_join_dialog");
+			f->fired = true;
+		}
 	}
 	set_key("moveup", &key_moveup, up && TouchSpec_StickShown(state));
 	set_key("movedown", &key_movedown, down && TouchSpec_StickShown(state));
@@ -2910,6 +2954,8 @@ static void draw_spec_bar(int state, float a)
 			held = role_owned(ROLE_SPEC_PREV);
 		else if (action == TOUCHSPEC_ACT_FREE)
 			held = role_owned(ROLE_SPEC_FREE);
+		else if (action == TOUCHSPEC_ACT_JOIN)
+			held = role_owned(ROLE_SPEC_JOIN);
 		else if (action != TOUCHSPEC_ACT_NONE)
 			held = role_owned(ROLE_SPEC_ATTACK) && key_attack;
 		widget_capsule(cx, cy, hx, hy, label, held || (part == TOUCHSPEC_BAR_MAIN && TouchSpec_Flying(state)), false, action == TOUCHSPEC_ACT_NONE ? a * 0.6f : a, C_ACCENT);
@@ -3414,7 +3460,8 @@ static void rect_pill(const char *name, const char *xk, float dx, const char *yk
 static void rect_circle(const char *name, const char *xk, float dx, const char *yk, float dy, const char *sk, float ds)
 {
 	float cx, cy;
-	widget_center(cv(xk, dx), cv(yk, dy), &cx, &cy);
+	float nx = cv(xk, dx);
+	widget_center(!strcmp(xk, "touch_crouch_x") ? crouch_x(nx) : nx, cv(yk, dy), &cx, &cy);
 	Con_Printf("TOUCHRECT c %s %.1f %.1f %.1f\n", name, cx, cy, widget_radius(cv(sk, ds)));
 }
 
@@ -3477,7 +3524,7 @@ void TouchHUD_PrintRects(void)
 		}
 		if (TouchSpec_StickShown(state))
 		{
-			widget_center(cv("touch_move_x", 0.170f), cv("touch_move_y", 0.680f), &cx, &cy);
+			stick_center(&cx, &cy);
 			Con_Printf("TOUCHRECT c stick %.1f %.1f %.1f\n", cx, cy, stick_radius());
 			spec_fly_part(true, &cx, &cy, &r);
 			Con_Printf("TOUCHRECT c UP %.1f %.1f %.1f\n", cx, cy, r);
@@ -3495,7 +3542,7 @@ void TouchHUD_PrintRects(void)
 	}
 	if (cv("touch_move_visible", 1))
 	{
-		widget_center(cv("touch_move_x", 0.170f), cv("touch_move_y", 0.680f), &cx, &cy);
+		stick_center(&cx, &cy);
 		Con_Printf("TOUCHRECT c stick %.1f %.1f %.1f\n", cx, cy, stick_radius());
 	}
 	if (cv("touch_fire_visible", 1))

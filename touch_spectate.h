@@ -64,7 +64,8 @@ static inline int TouchSpec_StateFrom(int frags, int me, int viewentity, int max
 #define TOUCHSPEC_BAR_PREV  0
 #define TOUCHSPEC_BAR_MAIN  1
 #define TOUCHSPEC_BAR_NEXT  2
-#define TOUCHSPEC_BAR_PARTS 3
+#define TOUCHSPEC_BAR_JOIN  3   // JOIN, beside the bar, when joining is allowed
+#define TOUCHSPEC_BAR_PARTS 4
 
 // What a part does.
 #define TOUCHSPEC_ACT_NONE    0
@@ -74,6 +75,7 @@ static inline int TouchSpec_StateFrom(int frags, int me, int viewentity, int max
 #define TOUCHSPEC_ACT_FREE    4   // +attack2 while held: back to free-fly
 #define TOUCHSPEC_ACT_UP      5   // +moveup while held (fly rocker)
 #define TOUCHSPEC_ACT_DOWN    6   // +movedown while held (fly rocker)
+#define TOUCHSPEC_ACT_JOIN    7   // on the press: open the join dialog, or auto-join
 
 static inline int TouchSpec_Flying(int state)
 {
@@ -82,6 +84,8 @@ static inline int TouchSpec_Flying(int state)
 
 static inline int TouchSpec_BarAction(int state, int part)
 {
+	if (part == TOUCHSPEC_BAR_JOIN)
+		return state != TOUCHSPEC_NONE ? TOUCHSPEC_ACT_JOIN : TOUCHSPEC_ACT_NONE;
 	if (TouchSpec_Flying(state))
 		// Free-flying, either arrow or the middle starts following; next /
 		// previous weapon would only change the flying speed.
@@ -113,6 +117,7 @@ static inline const char *TouchSpec_ActionLabel(int action)
 	case TOUCHSPEC_ACT_FREE: return "FREE";
 	case TOUCHSPEC_ACT_UP: return "UP";
 	case TOUCHSPEC_ACT_DOWN: return "DOWN";
+	case TOUCHSPEC_ACT_JOIN: return "JOIN";
 	default: return "";
 	}
 }
@@ -121,6 +126,8 @@ static inline const char *TouchSpec_ActionLabel(int action)
 static inline const char *TouchSpec_BarLabel(int state, int part)
 {
 	int action = TouchSpec_BarAction(state, part);
+	if (part == TOUCHSPEC_BAR_JOIN)
+		return action == TOUCHSPEC_ACT_JOIN ? "JOIN" : "";
 	if (action == TOUCHSPEC_ACT_NONE)
 		return part == TOUCHSPEC_BAR_MAIN && state != TOUCHSPEC_NONE ? "WATCHING" : "";
 	if (part == TOUCHSPEC_BAR_PREV)
@@ -152,10 +159,12 @@ static inline int TouchSpec_BarShown(int state, int visible)
 #define TOUCHSPEC_ROLE_FREE   302   // +attack2 while held: back to free-fly
 #define TOUCHSPEC_ROLE_UP     303   // +moveup while held
 #define TOUCHSPEC_ROLE_DOWN   304   // +movedown while held
+#define TOUCHSPEC_ROLE_JOIN   305   // the JOIN button, on the press
 
 static inline int TouchSpec_BarRole(int role)
 {
-	return role == TOUCHSPEC_ROLE_ATTACK || role == TOUCHSPEC_ROLE_PREV || role == TOUCHSPEC_ROLE_FREE;
+	return role == TOUCHSPEC_ROLE_ATTACK || role == TOUCHSPEC_ROLE_PREV || role == TOUCHSPEC_ROLE_FREE
+		|| role == TOUCHSPEC_ROLE_JOIN;
 }
 
 // Whether a finger with this role acts this frame.
@@ -167,7 +176,7 @@ static inline int TouchSpec_FingerActs(int state, int visible, int role)
 // What one finger's role contributes to the spectator frame.
 typedef struct touchspec_keys_s
 {
-	int fire, fire2, prev, up, down;
+	int fire, fire2, prev, up, down, join;
 } touchspec_keys_t;
 
 // Fold one held finger into the frame's outputs. Both the engine HUD and the
@@ -183,6 +192,7 @@ static inline void TouchSpec_AddFinger(touchspec_keys_t *k, int state, int visib
 	case TOUCHSPEC_ROLE_PREV: if (first) k->prev = 1; break;
 	case TOUCHSPEC_ROLE_UP: k->up = 1; break;
 	case TOUCHSPEC_ROLE_DOWN: k->down = 1; break;
+	case TOUCHSPEC_ROLE_JOIN: if (first) k->join = 1; break;
 	default: break;
 	}
 }

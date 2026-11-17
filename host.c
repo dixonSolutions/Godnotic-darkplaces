@@ -21,6 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // host.c -- coordinates spawning and killing of local servers
 
 #include "quakedef.h"
+#include "touch_frametime.h" // Touch: per-frame times for scripts/bench-frames.sh
 
 #include <time.h>
 #include "libcurl.h"
@@ -608,6 +609,7 @@ void Host_Shutdown(void)
 	if (Sys_CheckParm("-profilegameonly"))
 		Sys_AllowProfiling(false);
 	TouchUIB_Shutdown(); // Touch: UI bridge
+	TouchFrameTime_Shutdown(); // Touch: frame-time summary
 
 	if(cls.state != ca_dedicated)
 		CL_Shutdown();
@@ -665,6 +667,7 @@ double Host_Frame(double time)
 	double cl_wait, sv_wait;
 
 	++host.framecount;
+	TouchFrameTime_Frame(); // Touch: frame-time measurement
 
 	TaskQueue_Frame(false);
 
@@ -694,6 +697,8 @@ double Host_Frame(double time)
 	cl_wait = - CL_Frame(time);
 
 	Mem_CheckSentinelsGlobal();
+
+	TouchFrameTime_EndFrame(); // Touch: frame-time measurement
 
 	if (cls.state == ca_dedicated)
 		return sv_wait; // dedicated

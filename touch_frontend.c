@@ -43,6 +43,7 @@ Everything works on the desktop too, without a sink, for headless tests
 #include "touch_joinpreview.h" // Touch: the "preview" join stage
 #include "touch_music.h"
 #include "touch_hud.h"
+#include "touch_hudmode.h"
 #include "touch_lan.h"
 #include "touch_lua.h"
 #include "touch_net.h"
@@ -371,6 +372,7 @@ static void publish_app(void)
 	jb_kbool(&b, "console", (key_consoleactive & KEY_CONSOLEACTIVE_USER) != 0);
 	jb_kbool(&b, "local", sv.active);
 	jb_kbool(&b, "paused", cl.paused);
+	jb_kbool(&b, "menu_paused", TouchMode_MenuPaused(sv.active, host.paused, sv.paused));
 	jb_kbool(&b, "hosting", TouchLAN_HostingOnPurpose());
 	jb_kint(&b, "maxclients", sv.active ? svs.maxclients : 0);
 	jb_kstr(&b, "map", cls.state == ca_connected ? cl.worldbasename : "");

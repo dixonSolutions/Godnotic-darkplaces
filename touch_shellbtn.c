@@ -173,7 +173,7 @@ static void place(void)
 		// pill are gone, so beside where MENU was the button floated alone
 		// over the middle of the top edge. The menu's corner, as out of a match.
 	}
-	else if (in_match() && vid_touchscreen.integer && cv("touch_pause_visible", 1))
+	else if (in_match() && (vid_touchscreen.integer || vid_touchscreen_detected.integer || VID_SDL_HasTouchDevices()))
 	{
 		// In a match the corner belongs to the score list and the info
 		// messages, and the top bar has MENU, CHAT and the vote chip: the
@@ -191,6 +191,16 @@ static void place(void)
 			bs = min(tw, th);
 			bx = tx + (tw - bs) * 0.5f;
 			by = ty + (th - bs) * 0.5f;
+			return;
+		}
+		if (!cv("touch_pause_visible", 1))
+		{
+			srect_t bar[2];
+			int i, n = topbar_rects(bar);
+			me.x = bx; me.y = by; me.w = bs; me.h = bs;
+			for (i = 0; i < n; i++)
+				if (overlap(&me, &bar[i]))
+					by = me.y = bar[i].y + bar[i].h + margin;
 			return;
 		}
 		if (cv("touch_handedness", 0) != 0)

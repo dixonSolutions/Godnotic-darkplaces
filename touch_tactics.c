@@ -54,9 +54,11 @@ extern cvar_t cl_touch_aim_debug;
 extern cvar_t cl_forwardspeed;
 extern cvar_t cl_sidespeed;
 
-cvar_t cl_touch_esp_enabled = {CF_CLIENT | CF_ARCHIVE, "cl_touch_esp_enabled", "local",
-	"Where the see-through, intel and autopilot helpers may run: local (a match against bots on this machine, nobody else connected) or off. "
-	"There is no server setting: on a server they would play against people who do not have them"};
+cvar_t cl_touch_esp_enabled = {CF_CLIENT | CF_ARCHIVE, "cl_touch_esp_enabled", "off",
+	"Where the see-through, intel and autopilot helpers may run: on (a match against bots on this machine, nobody else connected, and only when the server allows them) or off. "
+	"Off by default. \"local\" was the old default and now reads as off; type \"on\" to turn it back on"};
+cvar_t sv_touch_esp = {CF_SERVER | CF_ARCHIVE, "sv_touch_esp", "1",
+	"Server: whether clients may use the offline practice helpers (see-through, intel, autopilot) when they are alone on this listen server. 0 forbids them everywhere on this server"};
 cvar_t cl_touch_practice_intel = {CF_CLIENT | CF_ARCHIVE, "cl_touch_practice_intel", "1",
 	"Offline practice only (a match against bots on this machine, nobody else connected): show every enemy's health, armour and weapon, "
 	"take the target worth taking first, switch to a weapon that finishes it in one shot, and to a splash weapon when it is behind a wall"};
@@ -198,8 +200,9 @@ static struct
 // visibly off.
 static qbool esp_disabled(const char *v)
 {
+	// "local" is the old default: a profile that never changed the switch holds it
 	return !v || !v[0] || !strcmp(v, "0") || !strcasecmp(v, "off")
-		|| !strcasecmp(v, "false") || !strcasecmp(v, "no");
+		|| !strcasecmp(v, "false") || !strcasecmp(v, "no") || !strcasecmp(v, "local");
 }
 
 // True when cl_touch_esp_enabled is off now, whatever its spelling.
@@ -222,19 +225,16 @@ int TouchTactics_EspGate(int g)
 	static char said[32];
 	const char *v = cl_touch_esp_enabled.string;
 	if (esp_disabled(v))
+		return TW_GATE_NO_SERVER;
+	if (strcmp(v, "1") && strcasecmp(v, "true") && strcasecmp(v, "yes") && strcasecmp(v, "on"))
 	{
-		if (v && v[0] && strcmp(v, "off") && strcmp(v, "0") && strcmp(said, v))
+		// said once, closed every time: the gate is asked more than once a frame
+		if (strcmp(said, v))
 		{
-			Con_Printf("cl_touch_esp_enabled \"%s\": only \"local\" or \"off\"; treating it as off\n", v);
+			Con_Printf("cl_touch_esp_enabled \"%s\": only \"on\" or \"off\"; treating it as off\n", v);
 			dp_strlcpy(said, v, sizeof(said));
 		}
 		return TW_GATE_NO_SERVER;
-	}
-	if (strcasecmp(v, "local") && strcmp(v, "1") && strcasecmp(v, "true") && strcasecmp(v, "yes") && strcasecmp(v, "on")
-		&& strcmp(said, v))
-	{
-		Con_Printf("cl_touch_esp_enabled \"%s\": only \"local\" or \"off\"; using local (these helpers never run on a server with other people)\n", v);
-		dp_strlcpy(said, v, sizeof(said));
 	}
 	return g;
 }
@@ -261,6 +261,10 @@ static int gate(void)
 			if (c->active && c->netconnection && LHNETADDRESS_GetAddressType(&c->netconnection->peeraddress) != LHNETADDRESSTYPE_LOOP)
 				e.other_humans++;
 		}
+	// the server's own switch, before the environment: a server may forbid
+	// client practice helpers on itself, and a local match is no exception
+	if (sv.active && !Cvar_VariableValue(&cvars_all, "sv_touch_esp", 1))
+		return TW_GATE_NO_SERVER;
 	return TouchTactics_EspGate(TouchWep_PracticeGate(&e));
 }
 
@@ -2056,6 +2060,7 @@ void TouchTactics_Init(void)
 {
 	Cmd_AddCommand(CF_CLIENT, "touch_tactics_probe", TouchTactics_Probe_f, "Testing: the autopilot's ground check and the point contents below x y z");
 	Cvar_RegisterVariable(&cl_touch_esp_enabled);
+	Cvar_RegisterVariable(&sv_touch_esp);
 	Cvar_RegisterVariable(&cl_touch_practice_intel);
 	Cvar_RegisterVariable(&cl_touch_practice_aimdodge);
 	Cvar_RegisterVariable(&cl_touch_practice_pilot);

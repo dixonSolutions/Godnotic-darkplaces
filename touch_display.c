@@ -26,10 +26,12 @@ the touch HUD reads them.
 
 cvar_t vid_touch_dpi = {CF_CLIENT | CF_READONLY, "vid_touch_dpi", "0",
 	"density of the display the game runs on, in dots per inch, as the system reports it (Android: DisplayMetrics.densityDpi); 0 = unknown. Read by the menu to size itself on a touch screen"};
+cvar_t vid_orientation = {CF_CLIENT | CF_ARCHIVE, "vid_orientation", "1", "Android orientation: 0 follows device rotation, 1 landscape, 2 portrait"};
 
 void TouchDisplay_Init(void)
 {
 	Cvar_RegisterVariable(&vid_touch_dpi);
+	Cvar_RegisterVariable(&vid_orientation);
 }
 
 void TouchDisplay_Update(int displayindex)
