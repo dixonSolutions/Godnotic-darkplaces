@@ -130,6 +130,7 @@ unsigned int TouchLoad_PicFlags(const char *path, unsigned int flags);
 // After every drawn frame: notices the menu's first frame and a load's first
 // game frame.
 void TouchLoadTime_Frame(void);
+void TouchLoadTime_Presented(void);
 void TouchLoadTime_WorldDrawn(int fbo);
 // Once per host frame, with the time the main loop is about to sleep: returns
 // the time it may sleep (0 with a local server, 1 ms with a remote one, while

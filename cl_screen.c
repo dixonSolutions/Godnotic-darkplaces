@@ -23,6 +23,7 @@
 // we have to include snd_main.h here only to get access to snd_renderbuffer->format.speed when writing the AVI headers
 #include "snd_main.h"
 #include "touch_net.h" // Touch: download size and time left
+#include "touch_joinpreview.h" // Touch: the world while a join loads
 #include "touch_uib.h" // Touch: one loading presentation
 
 cvar_t scr_viewsize = {CF_CLIENT | CF_ARCHIVE, "viewsize","100", "how large the view should be, 110 disables inventory bar, 120 disables status bar"};
@@ -1683,6 +1684,7 @@ static int loadingscreenpic_number = 0;
 char cl_connect_status[MAX_QPATH]; // should match size of loadingscreenstack_t msg[]
 
 static void SCR_DrawLoadingScreen(void);
+static void SCR_DrawLoadingStack(void); // Touch: the bar alone while the world previews
 static void SCR_DrawScreen (void)
 {
 	Draw_Frame();
@@ -1694,7 +1696,7 @@ static void SCR_DrawScreen (void)
 	r_refdef.view.cullface_front = GL_BACK;
 	r_refdef.view.cullface_back = GL_FRONT;
 
-	if (!scr_loading && cls.signon == SIGNONS)
+	if (TouchJoinPreview_Active() || (!scr_loading && cls.signon == SIGNONS)) // Touch: the world shows while a join loads
 	{
 		float size;
 
@@ -1763,7 +1765,7 @@ static void SCR_DrawScreen (void)
 
 		// if CSQC is loaded, it is required to provide the CSQC_UpdateView function,
 		// and won't render a view if it does not call that.
-		if (CLVM_prog->loaded && !(CLVM_prog->flag & PRVM_CSQC_SIMPLE))
+		if (!TouchJoinPreview_Camera() && CLVM_prog->loaded && !(CLVM_prog->flag & PRVM_CSQC_SIMPLE)) // Touch: a spectator camera while the map loads
 			CL_VM_UpdateView(r_stereo_side ? 0.0 : max(0.0, cl.time - cl.oldtime));
 		else
 		{
@@ -1857,6 +1859,10 @@ static void SCR_DrawScreen (void)
 
 	if (scr_loading)
 	{
+		// Touch: the world renders behind it now, so only the progress stays
+		if (TouchJoinPreview_Active())
+			SCR_DrawLoadingStack();
+		else
 		// connect_status replaces any dummy_status
 		if ((!loadingscreenstack || loadingscreenstack->msg[0] == '\0') && cl_connect_status[0] != '\0')
 		{
@@ -2482,6 +2488,7 @@ void CL_UpdateScreen(void)
 	TouchWarm_Frame(); // Touch: menu-idle warm-up of the next game
 	qglFlush(); // ensure that the commands are submitted to the GPU before we do other things
 	VID_Finish();
+	TouchLoadTime_Presented(); // Touch: time the first presented world frame
 }
 
 void CL_Screen_NewMap(void)

@@ -69,6 +69,7 @@ OBJ_COMMON= \
 	touch_lua_ui.o \
 	touch_assets_zstd.o \
 	touch_loadtime.o \
+	touch_joinpreview.o \
 	touch_loadfs.o \
 	touch_loadcvar.o \
 	touch_warm.o \
