@@ -291,8 +291,7 @@ void TouchLoadTime_Frame(void)
 	int i;
 
 #ifdef __ANDROID__
-	Andysu_DrawnFrame(now, host.state == host_active && !scr_loading && key_dest == key_menu && cls.state != ca_connected,
-		tlt_world_drawn);
+	Andysu_DrawnFrame(now, host.state == host_active, tlt_world_drawn);
 #endif
 
 	// cl_screen calls this after drawing, with the render context current.
