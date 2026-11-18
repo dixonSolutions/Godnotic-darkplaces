@@ -34,6 +34,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "touch_android.h"
 #include "touch_display.h" // Touch
 #include "touch_sdl_visibility.h" // Touch: desktop minimise state
+#include "touch_sdl_resize.h" // Touch: live drawable resize
+#include "touch_sdl_resize_cvars.h" // Touch: live input dimensions
 
 #ifndef __IPHONEOS__
 #ifdef MACOSX
@@ -1855,6 +1857,7 @@ void Sys_SDL_HandleEvents(void)
 				//if (event.window.windowID == window) // how to compare?
 				{
 					Touch_SDLVisibility(event.window.event, &vid_hidden); // Touch: track desktop minimise and restore
+					Touch_SDLResizeBefore(event.window.event, vid.mode.width, vid.mode.height); // Touch: preserve the last drawable
 					switch(event.window.event)
 					{
 					case SDL_WINDOWEVENT_SHOWN:
@@ -1966,6 +1969,8 @@ void Sys_SDL_HandleEvents(void)
 					break;
 #endif
 				}
+				Touch_SDLResizeAfter(event.window.event, window, &vid.mode.width, &vid.mode.height); // Touch: apply the live drawable
+				Touch_SDLResizeCvars(event.window.event, vid.mode.width, vid.mode.height); // Touch: update input dimensions without modesetting
 				}
 				break;
 		case SDL_DISPLAYEVENT: // Display hotplugging
