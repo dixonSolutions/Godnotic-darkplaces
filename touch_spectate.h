@@ -312,4 +312,29 @@ static inline void TouchSpec_BarLayout(float w, float h, float want_x, float wan
 	}
 }
 
+static inline float TouchSpec_Abs(float v)
+{
+	return v < 0 ? -v : v;
+}
+
+// Which part of a laid-out bar is under a point, or -1. The HUD draws and
+// hit-tests with the same rectangles and the same forgiveness (12% of the
+// half-height sideways, 15% up and down), including the desk strip whose
+// parts take a finger when the touch controls are off.
+static inline int TouchSpec_BarPartAt(const touchspec_bar_rect_t *r, int join, float px, float py)
+{
+	int part;
+	for (part = 0; part < TOUCHSPEC_BAR_PARTS; part++)
+	{
+		if (part == TOUCHSPEC_BAR_JOIN && !join)
+			continue;
+		if (r[part].hy <= 0)
+			continue;
+		if (TouchSpec_Abs(px - r[part].cx) <= r[part].hx + r[part].hy * 0.12f
+			&& TouchSpec_Abs(py - r[part].cy) <= r[part].hy * 1.15f)
+			return part;
+	}
+	return -1;
+}
+
 #endif

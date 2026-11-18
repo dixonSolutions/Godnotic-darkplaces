@@ -1497,8 +1497,11 @@ static int pill_at(float px, float py)
 	return ROLE_NONE;
 }
 
-// With the controls off: the pills (touch_desk_pills) and the strip, and
-// one look finger anywhere else. A tap fires nothing.
+// With the controls off: the pills (touch_desk_pills), the spectator bar,
+// the strip, and one look finger anywhere else. A tap fires nothing.
+static int spec_bar_part_at(float px, float py);
+static int spec_action_role(int action);
+static qbool desk_specbar_shown(void);
 static int assign_desk_role(float px, float py)
 {
 	int role = ROLE_NONE;
@@ -1506,6 +1509,20 @@ static int assign_desk_role(float px, float py)
 		role = pill_at(px, py);
 	if (role != ROLE_NONE)
 		return role;
+	// The spectator bar is on screen in desk mode too (draw_desk_specbar).
+	// A finger on it means what the same part means with the controls on; it
+	// used to be drawn but only a real mouse click acted, so tapping <, > or
+	// FREE did nothing exactly when a keyboard had put the controls away.
+	if (desk_specbar_shown())
+	{
+		int state = TouchUI_SpectatorState();
+		int part = spec_bar_part_at(px, py);
+		if (part >= 0)
+		{
+			int action = TouchSpec_BarAction(state, part);
+			return action != TOUCHSPEC_ACT_NONE ? spec_action_role(action) : ROLE_IGNORED;
+		}
+	}
 	if (grip_hit(px, py))
 		return role_owned(ROLE_WEPGRIP) ? ROLE_IGNORED : ROLE_WEPGRIP;
 	if (strip_hit(px, py) >= 0)
@@ -2806,13 +2823,27 @@ static void spec_release(void)
 
 // The spectator bar: three parts side by side, bottom right under the right
 // thumb (mirrored left-handed). Secondary size, a 48 dp row.
-static void spec_bar_part(int part, float *cx, float *cy, float *hx, float *hy)
+static void spec_bar_layout(touchspec_bar_rect_t r[TOUCHSPEC_BAR_PARTS])
 {
 	float u = dp_units(), bx, by, base;
-	touchspec_bar_rect_t r[TOUCHSPEC_BAR_PARTS];
 	widget_center(cv("touch_specbar_x", 0.815f), cv("touch_specbar_y", 0.885f), &bx, &by);
 	base = max(TOUCHDP_SECONDARY * 0.5f * u, screen_min() * cv("touch_specbar_size", 0.085f) * 0.5f * widget_scale());
 	TouchSpec_BarLayout(ui_w(), ui_h(), bx, by, base, u, spec_join_shown(), r);
+}
+
+// The bar part under a point: the one test the drawn bar and the desk strip
+// both use (spec_join_shown decides whether JOIN is part of the row).
+static int spec_bar_part_at(float px, float py)
+{
+	touchspec_bar_rect_t r[TOUCHSPEC_BAR_PARTS];
+	spec_bar_layout(r);
+	return TouchSpec_BarPartAt(r, spec_join_shown(), px, py);
+}
+
+static void spec_bar_part(int part, float *cx, float *cy, float *hx, float *hy)
+{
+	touchspec_bar_rect_t r[TOUCHSPEC_BAR_PARTS];
+	spec_bar_layout(r);
 	if (part == TOUCHSPEC_BAR_JOIN && !spec_join_shown())
 	{
 		*cx = *cy = -1000;
@@ -2856,13 +2887,14 @@ static int assign_spec_role(float px, float py)
 	if (in_edge_deadzone(px, py))
 		return ROLE_IGNORED;
 	if (spec_bar_shown())
-		for (part = 0; part < TOUCHSPEC_BAR_PARTS; part++)
+	{
+		part = spec_bar_part_at(px, py);
+		if (part >= 0)
 		{
 			int action = TouchSpec_BarAction(state, part);
-			spec_bar_part(part, &cx, &cy, &hx, &hy);
-			if (fabs(px - cx) <= hx + hy * 0.12f && fabs(py - cy) <= hy * 1.15f)
-				return action != TOUCHSPEC_ACT_NONE ? spec_action_role(action) : ROLE_IGNORED;
+			return action != TOUCHSPEC_ACT_NONE ? spec_action_role(action) : ROLE_IGNORED;
 		}
+	}
 	if (TouchSpec_StickShown(state))
 	{
 		int up;
