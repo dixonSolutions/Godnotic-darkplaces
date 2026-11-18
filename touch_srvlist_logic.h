@@ -41,6 +41,7 @@ shared by touch_srvlist.c and tests/srvlist/srvlist_logic_test.c.
 #define TOUCHSL_RETRY_INTERVAL    1.1     // a server ignores a second getstatus from one address for 1 s
 #define TOUCHSL_MIN_REQUERY       20.0    // background: a server that answered is left alone this long
 #define TOUCHSL_MASTER_WAIT       1.5     // a master that has said nothing by then holds nothing up
+#define TOUCHSL_MASTER_RETRY      0.2     // recover a lost first request without waiting for the full master timeout
 #define TOUCHSL_FILE_VERSION      "godnotic-serverlist 1"
 #define TOUCHSL_MAX_RECORDS       1024
 #define TOUCHSL_MAX_AGE           (7 * 86400)   // a server not seen for a week is forgotten
@@ -49,7 +50,7 @@ shared by touch_srvlist.c and tests/srvlist/srvlist_logic_test.c.
 // Retry a silent master with an exponential delay, capped at 30 seconds.
 static inline double TouchSL_MasterRetryDelay(unsigned attempt)
 {
-	double delay = TOUCHSL_MASTER_WAIT;
+	double delay = TOUCHSL_MASTER_RETRY;
 	while (attempt-- && delay < 30.0)
 		delay *= 2.0;
 	return delay > 30.0 ? 30.0 : delay;
