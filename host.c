@@ -31,6 +31,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "andysu_engine.h"
 #endif
 #include "touch_uib.h" // Touch: UI bridge
+#include "touch_srvlist.h" // Touch: persist the server list on shutdown
 #include "touch_datafetch.h" // Touch: progressive data download
 
 /*
@@ -609,6 +610,7 @@ void Host_Shutdown(void)
 	if (Sys_CheckParm("-profilegameonly"))
 		Sys_AllowProfiling(false);
 	TouchUIB_Shutdown(); // Touch: UI bridge
+	TouchSrvList_Shutdown(); // Touch: save answers from an unfinished refresh
 	TouchFrameTime_Shutdown(); // Touch: frame-time summary
 
 	if(cls.state != ca_dedicated)

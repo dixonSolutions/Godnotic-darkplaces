@@ -49,7 +49,9 @@ extern kbutton_t in_attack, in_button3;
 
 cvar_t cl_touch_autoshoot = {CF_CLIENT | CF_ARCHIVE, "cl_touch_autoshoot", "1",
 	"Touch controls: fire automatically while the crosshair is on a visible enemy player. "
-	"Only in touch mode (vid_touchscreen); never active with a keyboard attached. A manual FIRE press always works on top of it"};
+	"Desktop use also requires cl_accessibility_desktop. A manual FIRE press always works on top of it"};
+cvar_t cl_accessibility_desktop = {CF_CLIENT | CF_ARCHIVE, "cl_accessibility_desktop", "0",
+	"Allow the mobile auto-shoot and aim-assist settings to work with mouse and keyboard"};
 cvar_t cl_touch_autoshoot_delay = {CF_CLIENT | CF_ARCHIVE, "cl_touch_autoshoot_delay", "0",
 	"Auto-shoot reaction time: seconds the crosshair must stay on an enemy before firing starts (0 = on the first frame, at most 0.5)"};
 cvar_t cl_touch_autoshoot_release = {CF_CLIENT | CF_ARCHIVE, "cl_touch_autoshoot_release", "0.15",
@@ -378,6 +380,7 @@ void TouchAim_Init(void)
 {
 	TouchAssist_Init();
 	Cvar_RegisterVariable(&cl_touch_autoshoot);
+	Cvar_RegisterVariable(&cl_accessibility_desktop);
 	Cvar_RegisterVariable(&cl_touch_autoshoot_delay);
 	Cvar_RegisterVariable(&cl_touch_autoshoot_release);
 	Cvar_RegisterVariable(&cl_touch_autoshoot_radius);
@@ -2940,7 +2943,7 @@ static void aim_frame(void)
 {
 	double now = host.realtime;
 	float dt = bound(0.001f, (float)cl.realframetime, 0.1f);
-	qbool autoshoot, assist, aim_touch, manual, locked, guided, pull_target_set = false;
+	qbool autoshoot, assist, aim_touch, manual, locked, guided, input_enabled, pull_target_set = false;
 	float friction, strength, cone, turn_yaw, turn_pitch, turn_mag, radius, pull_yaw = 0, pull_pitch = 0;
 	vec3_t eye, fwd;
 	int on_target, friend_on, on_shoot, shootable, held, retained_seen, mode = TW_MODE_PRIMARY, why = TW_WHY_DEFAULT, mate_block;
@@ -2986,8 +2989,9 @@ static void aim_frame(void)
 	num_marks = 0;
 
 	// what the server allows (touch_assist.c): all, on a server that says nothing
-	autoshoot = cl_touch_autoshoot.integer != 0 && TouchAssist_Allowed(TOUCH_ASSIST_AUTOSHOOT);
-	assist = cl_touch_aimassist.integer != 0 && TouchAssist_Allowed(TOUCH_ASSIST_AIM);
+	input_enabled = TouchAim_EnabledForInput(vid_touchscreen.integer != 0, vid_touchscreen_mouselook.integer != 0, cl_accessibility_desktop.integer != 0);
+	autoshoot = input_enabled && cl_touch_autoshoot.integer != 0 && TouchAssist_Allowed(TOUCH_ASSIST_AUTOSHOOT);
+	assist = input_enabled && cl_touch_aimassist.integer != 0 && TouchAssist_Allowed(TOUCH_ASSIST_AIM);
 	friction = assist ? bound(0.0f, cl_touch_aimassist_friction.value, FRICTION_MAX) : 0;
 	strength = assist ? bound(0.0f, cl_touch_aimassist_strength.value, STRENGTH_MAX) : 0;
 	// the cone reaches at most the edge of the view: half the horizontal

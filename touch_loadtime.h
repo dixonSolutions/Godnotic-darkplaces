@@ -124,7 +124,8 @@ void TouchLoad_EnsureCSQCDeflated(void);
 // The menu precaches every picture of its skin at start (107 on the phone
 // packs, each one or two JPEG decodes). touch_load_lazypics 1: a menu
 // precache_pic of a file that exists only remembers the name and flags; the
-// picture loads, persistent as precached, when first drawn.
+// picture loads, persistent as precached, when first drawn. The same applies
+// to the client VM of a local game; remote clients retain the original path.
 qbool TouchLoad_LazyPrecachePic(struct prvm_prog_s *prog, const char *name, unsigned int flags);
 unsigned int TouchLoad_PicFlags(const char *path, unsigned int flags);
 // After every drawn frame: notices the menu's first frame and a load's first

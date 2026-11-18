@@ -1010,6 +1010,16 @@ void TouchSrvList_Init(void)
 	Cmd_AddCommand(CF_CLIENT, "net_slist_stats", TouchSrvList_Stats_f, "Godnotic: timings of the last server list refresh (first row, 50%, 95%, settled)");
 }
 
+void TouchSrvList_Shutdown(void)
+{
+	if (sl.running && sl.fast && !sl.model && net_slist_saved.integer)
+	{
+		recs_load();
+		recs_merge();
+		recs_save();
+	}
+}
+
 // the file system is up by the first frame
 void TouchSrvList_FirstFrame(void)
 {
@@ -1023,6 +1033,7 @@ qbool TouchSrvList_IsStale(unsigned n) { return false; }
 qbool TouchSrvList_Hold(void) { return false; }
 unsigned TouchSrvList_Serial(void) { return 0; }
 void TouchSrvList_Init(void) {}
+void TouchSrvList_Shutdown(void) {}
 void TouchSrvList_Frame(void) {}
 void TouchSrvList_FirstFrame(void) {}
 

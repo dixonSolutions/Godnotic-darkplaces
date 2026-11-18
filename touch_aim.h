@@ -3,8 +3,8 @@ Godnotic: auto-shoot and aim helpers for touch players.
 
 Lives in the engine client, not in QuakeC, because on a public server the
 client runs that server's own CSQC; the same code has to work there and in a
-local match. Everything is inactive unless vid_touchscreen is on (no physical
-keyboard, or touch mode forced to Always).
+local match. Auto-shoot and aim assist require touch input or the desktop
+accessibility opt-in, as well as their individual settings.
 
 - Auto-shoot: while the crosshair is on (or, within cl_touch_autoshoot_radius,
   near) a visible enemy player -- where a projectile will meet them -- the
