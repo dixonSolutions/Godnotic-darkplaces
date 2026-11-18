@@ -37,6 +37,7 @@
 #include "taskqueue.h"
 #include "thread.h"
 #include "libcurl.h"
+#include "touch_exit.h" // Touch: how Android leaves the process
 #if defined(__ANDROID__) && defined(ANDYSU_SWAP)
 #include "andysu_engine.h"
 #endif
@@ -1139,6 +1140,7 @@ static void Sys_InitSignals(void)
 #endif
 	signal(SIGPIPE, Sys_HandleSignal);
 #endif
+	TouchExit_Signals(); // Touch: Android ignores SIGPIPE (touch_exit.h)
 }
 
 // Cloudwalk: Most overpowered function declaration...
@@ -1197,6 +1199,7 @@ static void Sys_Frame(void)
 			return;
 		}
 #endif
+		TouchExit_Leave(0); // Touch: Android ends here, no destructors under live threads (touch_exit.h)
 		exit(0);
 	}
 

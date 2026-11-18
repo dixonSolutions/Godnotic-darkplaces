@@ -47,6 +47,7 @@ static qbool jp_drew;            // a preview frame was drawn since the last swa
 static vec3_t jp_org, jp_ang;    // the smoothed camera
 static qbool jp_have_cam;        // jp_org and jp_ang are usable
 static double jp_cam_time;       // when the camera last moved
+static int jp_newmap;            // R_Modules_NewMap in progress (touch_joinpreview_logic.h)
 
 #define JP_FOLLOW_DIST 150.0f    // units behind the followed player
 #define JP_FOLLOW_HEIGHT 45.0f   // above their origin
@@ -63,6 +64,8 @@ void TouchJoinPreview_Init(void)
 // brush data is there. Before that the loading page has nothing to show.
 qbool TouchJoinPreview_Active(void)
 {
+	if (cls.state != ca_connected)
+		jp_newmap = 0; // a Host_Error longjmp out of a newmap never reached its end
 	if (!touch_join_preview.integer)
 		return false;
 	if (key_dest != key_game && !TouchFE_MenuHidden())
@@ -88,8 +91,8 @@ qbool TouchJoinPreview_Active(void)
 		jp_have_cam = false;
 		jp_cam_time = 0;
 	}
-	if (!TouchJoinPreview_Drawable(1, cl.worldmodel->brush.num_leafs, cl.worldmodel->brush.data_leafs != NULL,
-		cl.worldmodel->num_surfaces, cl.worldmodel->data_surfaces != NULL))
+	if (!TouchJoinPreview_Allowed(TouchJoinPreview_Drawable(1, cl.worldmodel->brush.num_leafs, cl.worldmodel->brush.data_leafs != NULL,
+		cl.worldmodel->num_surfaces, cl.worldmodel->data_surfaces != NULL), jp_newmap))
 		return false;
 	if (key_consoleactive & KEY_CONSOLEACTIVE_FORCED)
 		return false;
@@ -131,8 +134,8 @@ qbool TouchJoinPreview_Waiting(void)
 	if (cls.demoplayback || cls.timedemo)
 		return false;
 	if (cl.worldmodel)
-		drawable = TouchJoinPreview_Drawable(1, cl.worldmodel->brush.num_leafs, cl.worldmodel->brush.data_leafs != NULL,
-			cl.worldmodel->num_surfaces, cl.worldmodel->data_surfaces != NULL) != 0;
+		drawable = TouchJoinPreview_Allowed(TouchJoinPreview_Drawable(1, cl.worldmodel->brush.num_leafs, cl.worldmodel->brush.data_leafs != NULL,
+			cl.worldmodel->num_surfaces, cl.worldmodel->data_surfaces != NULL), jp_newmap) != 0; // inside a newmap the levelshot stays
 	return TouchJoinPreview_ShowsLevelshot(1, 1, JP_MapName(map, sizeof(map)), drawable) != 0;
 }
 
@@ -183,6 +186,11 @@ qbool TouchJoinPreview_DrawLevelshot(void)
 	R_SetupShader_Generic(Draw_GetPicTexture(pic), true, true, false);
 	R_Mesh_Draw(0, 4, 0, 2, polygonelement3i, NULL, 0, polygonelement3s, NULL, 0);
 	return true;
+}
+
+void TouchJoinPreview_NewMap(qbool begin)
+{
+	jp_newmap = TouchJoinPreview_NewMapDepth(jp_newmap, begin);
 }
 
 qbool TouchJoinPreview_Drew(void)

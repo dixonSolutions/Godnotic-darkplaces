@@ -45,6 +45,10 @@ qbool TouchJoinPreview_Waiting(void);
 // (no map name yet, a missing levelshot, or the world is drawable already).
 qbool TouchJoinPreview_DrawLevelshot(void);
 
+// R_Modules_NewMap begins (true) or ends (false): no preview frame in between,
+// the renderer is half reset (r_modules.c, touch_joinpreview_logic.h).
+void TouchJoinPreview_NewMap(qbool begin);
+
 void TouchJoinPreview_Init(void);
 
 #endif

@@ -1,5 +1,6 @@
 
 #include "quakedef.h"
+#include "touch_joinpreview.h" // Touch: no join preview frame during a newmap
 
 #define MAXRENDERMODULES 20
 
@@ -105,6 +106,7 @@ void R_Modules_Restart_f(cmd_state_t *cmd)
 void R_Modules_NewMap(void)
 {
 	int i;
+	TouchJoinPreview_NewMap(true); // Touch: the loading screen may redraw inside a newmap; no world frame then
 	R_SkinFrame_PrepareForPurge();
 	for (i = 0;i < MAXRENDERMODULES;i++)
 	{
@@ -115,6 +117,7 @@ void R_Modules_NewMap(void)
 		rendermodule[i].newmap();
 	}
 	R_SkinFrame_Purge();
+	TouchJoinPreview_NewMap(false); // Touch:
 }
 
 void R_Modules_DeviceLost(void)

@@ -35,4 +35,24 @@ static inline int TouchJoinPreview_SceneModel(int current, int cached)
 	return current;
 }
 
+/* R_Modules_NewMap resets the renderer one module at a time, and the skybox and
+ * texture loads inside it redraw the loading screen (CL_KeepaliveMonitor ->
+ * SCR_UpdateLoadingScreen -> SCR_DrawScreen). A preview frame drawn there runs
+ * R_RenderView through half-reset renderer state: the SIGSEGV at fault address
+ * 0x233 (and once 0xffffffffffffe7, in Mem_Free) in R_RenderScene, stack
+ * gl_main_newmap -> CL_ParseEntityLump -> R_SetSkyBox -> loadimagepixelsbgra ->
+ * CL_KeepaliveMonitor, seen in 1.2.251 to 1.2.273. No preview frame while a
+ * newmap runs; the loading page shows for that moment instead. */
+static inline int TouchJoinPreview_Allowed(int drawable, int newmap_depth)
+{
+	return drawable && newmap_depth <= 0;
+}
+
+/* Nesting count of newmaps in progress (begin +1, end -1), never below zero. */
+static inline int TouchJoinPreview_NewMapDepth(int depth, int begin)
+{
+	depth += begin ? 1 : -1;
+	return depth < 0 ? 0 : depth;
+}
+
 #endif
