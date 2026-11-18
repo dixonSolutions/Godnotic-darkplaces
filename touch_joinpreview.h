@@ -53,6 +53,10 @@ void TouchJoinPreview_NewMap(qbool begin);
 // exists; the levelshot shows from then until the loading plaque ends.
 void TouchJoinPreview_SetMap(const char *map);
 qbool TouchJoinPreview_LocalLoading(void);
+// The picture behind the join: TJP_PIC_* (touch_joinpreview_logic.h), its file in name
+// ("maps/foo.jpg", "" for none): the map's own, else what the server list's map name
+// finds, else a dim generic map picture. Asked again while the map's own is missing.
+int TouchJoinPreview_Picture(char *name, int size);
 // The map of the join or local start in progress, "foo" ("" and false when unknown).
 qbool TouchJoinPreview_MapName(char *buf, int size);
 

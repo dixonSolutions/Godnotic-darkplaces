@@ -24,6 +24,7 @@
 #include "snd_main.h"
 #include "touch_net.h" // Touch: download size and time left
 #include "touch_joinpreview.h" // Touch: the world while a join loads
+#include "touch_joinpreview_logic.h" // Touch: the engine band rule
 #include "touch_uib.h" // Touch: one loading presentation
 
 cvar_t scr_viewsize = {CF_CLIENT | CF_ARCHIVE, "viewsize","100", "how large the view should be, 110 disables inventory bar, 120 disables status bar"};
@@ -2099,7 +2100,7 @@ static void SCR_DrawLoadingStack(void)
 
 	if (!TouchUIB_LoadingCardUp()) // Touch: the step's text is on the front end's loading card
 	SCR_DrawLoadingStack_r(loadingscreenstack, vid_conheight.integer, scr_loadingscreen_barheight.value);
-	if(loadingscreenstack)
+	if(TouchJoinPreview_DrawEngineBand(TouchUIB_LoadingCardUp(), loadingscreenstack != NULL)) // Touch: the bar is the card's progress bar (load_progress)
 	{
 		// height = 32; // sorry, using the actual one is ugly
 		GL_BlendFunc(GL_SRC_ALPHA, GL_ONE);

@@ -1430,6 +1430,11 @@ void TouchNet_CurlProgress(int index, double bytes)
 		tn_curl_bytes[index] = bytes;
 }
 
+double TouchNet_CurlBytes(int index)
+{
+	return index >= 0 && index < TN_CURLSLOTS ? tn_curl_bytes[index] : 0;
+}
+
 static void TN_Size(char *out, size_t size, double bytes)
 {
 	if (bytes >= 1048576.0)

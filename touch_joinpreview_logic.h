@@ -28,6 +28,64 @@ static inline int TouchJoinPreview_ShowsLevelshot(int preview_on, int joining, i
 	return preview_on && joining && map_known && !drawable;
 }
 
+/* A server join always has a picture behind it, never the logo screen: the map's
+ * own picture if this install has it, else the one the server list's map name
+ * finds, else a dimmed generic map picture. The world replaces it when drawable.
+ * Unlike TouchJoinPreview_ShowsLevelshot this does not need the map name. */
+static inline int TouchJoinPreview_ShowsPicture(int preview_on, int joining, int drawable)
+{
+	return preview_on && joining && !drawable;
+}
+
+#define TJP_PIC_NONE 0
+#define TJP_PIC_MAP 1      /* the map's own picture (maps/<map>.jpg, levelshots/<map>) */
+#define TJP_PIC_LIST 2     /* the picture the server list's map name finds */
+#define TJP_PIC_GENERIC 3  /* any map picture, dimmed: the map is not here yet */
+
+static inline int TouchJoinPreview_PictureChoice(int have_map, int have_list, int have_generic)
+{
+	if (have_map)
+		return TJP_PIC_MAP;
+	if (have_list)
+		return TJP_PIC_LIST;
+	return have_generic ? TJP_PIC_GENERIC : TJP_PIC_NONE;
+}
+
+/* Brightness of the picture: the generic one is dimmed so it reads as a backdrop. */
+static inline float TouchJoinPreview_PictureBrightness(int choice)
+{
+	return choice == TJP_PIC_GENERIC ? 0.45f : 1.0f;
+}
+
+/* The precache step shown on the card: models or sounds being loaded, of the total
+ * (cl.loadmodel_current of loadmodel_total). kind: 1 models, 2 sounds, 0 none. */
+static inline int TouchJoinPreview_PrecacheKind(int begun, int finished, int model_cur, int model_total, int sound_cur, int sound_total)
+{
+	if (!begun || finished)
+		return 0;
+	if (model_cur < model_total)
+		return 1;
+	if (sound_cur < sound_total)
+		return 2;
+	return 0;
+}
+
+/* A retry of the picture lookup while the map's own picture is not there yet (it comes
+ * with the map's pack, which is downloading), at most every half second; a found map
+ * picture is final. */
+static inline int TouchJoinPreview_RetryPicture(int choice, double now, double last)
+{
+	return choice != TJP_PIC_MAP && now - last >= 0.5;
+}
+
+/* The engine's own loading band (SCR_DrawLoadingStack: the step's text and the
+ * progress strip along the bottom) is drawn only when no native card shows the same
+ * step and fraction (connect load, load_progress, precache). */
+static inline int TouchJoinPreview_DrawEngineBand(int card_up, int have_stack)
+{
+	return have_stack && !card_up;
+}
+
 /* The scene always uses the client's current world, never a cached one. */
 static inline int TouchJoinPreview_SceneModel(int current, int cached)
 {

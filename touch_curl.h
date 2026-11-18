@@ -19,7 +19,7 @@
 // (stock CURLOPT_RESUME_FROM). Downloads with a speed limit (curl_maxspeed,
 // sv_curl_maxspeed) are never split, so the limit holds.
 
-static cvar_t curl_segments = {CF_CLIENT | CF_ARCHIVE, "curl_segments", "4", "connections one large HTTP download may use at once (Godnotic, docs/NETWORK.md); 1 = one, as stock"};
+static cvar_t curl_segments = {CF_CLIENT | CF_ARCHIVE, "curl_segments", "6", "connections one large HTTP download may use at once (Godnotic, docs/NETWORK.md); 1 = one, as stock"};
 static cvar_t curl_segment_size = {CF_CLIENT | CF_ARCHIVE, "curl_segment_size", "2097152", "smallest piece in bytes worth its own connection when a download is split"};
 
 #define TC_MAXSEG 7

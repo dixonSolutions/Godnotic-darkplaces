@@ -41,6 +41,7 @@ Everything works on the desktop too, without a sink, for headless tests
 #include "libcurl.h"
 #include "touch_frontend.h"
 #include "touch_joinpreview.h" // Touch: the "preview" join stage
+#include "touch_joinpreview_logic.h" // Touch: picture kinds, precache step
 #include "touch_music.h"
 #include "touch_datafetch.h"
 #include "touch_loadfs.h" // Touch: the theme pack may land after start-up
@@ -430,7 +431,8 @@ static void publish_connect(qbool force)
 	jb_t b = {0};
 	char addr[128] = "", label[200];
 	int n = 0, i;
-	double bytes = 0, speed = 0, progress = 0;
+	double bytes = 0, speed = 0, progress = 0, dlbytes = 0;
+	int dlindex = -1;
 	Curl_downloadinfo_t *dl;
 	const char *stage = "idle";
 	if (cls.connect_trying)
@@ -444,6 +446,11 @@ static void publish_connect(qbool force)
 			continue;
 		progress = dl[i].progress;
 		speed += dl[i].speed;
+		if (dlindex < 0)
+		{
+			dlindex = i; // the first running download is the one the card names
+			dlbytes = TouchNet_CurlBytes(i);
+		}
 	}
 	if (cls.connect_trying)
 		stage = "connecting";
@@ -469,33 +476,49 @@ static void publish_connect(qbool force)
 		jb_kstr(&b, "file", dl[0].filename);
 		jb_knum(&b, "download_progress", progress);
 		jb_knum(&b, "speed", speed); // bytes per second
+		// the card's "x of y MB": bytes so far and the file's size (0 until known)
+		jb_knum(&b, "download_bytes", dlbytes);
+		jb_knum(&b, "download_total", dlbytes > 0 && progress > 0 && progress <= 1 ? dlbytes / progress : 0);
+	}
+	// the precache step ("models 12/40"): what the engine's loading band showed
+	{
+		int kind = TouchJoinPreview_PrecacheKind(cl.loadbegun, cl.loadfinished, cl.loadmodel_current, cl.loadmodel_total, cl.loadsound_current, cl.loadsound_total);
+		jb_kstr(&b, "precache", kind == 1 ? "models" : kind == 2 ? "sounds" : "");
+		jb_kint(&b, "precache_n", kind == 1 ? cl.loadmodel_current : kind == 2 ? cl.loadsound_current : 0);
+		jb_kint(&b, "precache_total", kind == 1 ? cl.loadmodel_total : kind == 2 ? cl.loadsound_total : 0);
 	}
 	jb_kstr(&b, "load", scr_loading ? fe.load_msg : "");
 	jb_knum(&b, "load_progress", scr_loading ? fe.load_fraction : 0);
 	jb_kbool(&b, "local", sv.active || TouchJoinPreview_LocalLoading());
-	// the map's picture for the native card, from the first moment the map is known
-	// (the local game's pick, the server list's row, the serverinfo) until the world draws
+	// the map's picture for the native card, from the first moment of a join until the
+	// world draws: the map's own, else what the server list's map name finds, else a
+	// generic map picture (levelshot_kind says which; the card dims and blurs the last)
 	{
-		char map[MAX_QPATH], shot[MAX_OSPATH] = "";
-		static char shot_map[MAX_QPATH], shot_path[MAX_OSPATH];
+		char map[MAX_QPATH], shot[MAX_OSPATH] = "", pic[MAX_QPATH];
+		static char shot_name[MAX_QPATH], shot_path[MAX_OSPATH];
+		static int shot_kind;
 		qbool known = TouchJoinPreview_MapName(map, sizeof(map));
-		if (!known && addr[0] && TouchJoinName_MapFor(addr)[0])
+		if (cls.connect_trying || cls.state == ca_connected || TouchJoinPreview_LocalLoading())
 		{
-			dp_strlcpy(map, TouchJoinName_MapFor(addr), sizeof(map));
-			known = true;
-		}
-		if (known && (cls.connect_trying || cls.state == ca_connected || TouchJoinPreview_LocalLoading()))
-		{
-			if (strcmp(shot_map, map))
+			int kind = TouchJoinPreview_Picture(pic, sizeof(pic));
+			if (strcmp(shot_name, pic) || shot_kind != kind)
 			{
-				dp_strlcpy(shot_map, map, sizeof(shot_map));
-				if (!image_file(map, shot_path, sizeof(shot_path)))
-					shot_path[0] = 0;
+				dp_strlcpy(shot_name, pic, sizeof(shot_name));
+				shot_kind = kind;
+				shot_path[0] = 0;
+				if (pic[0])
+				{
+					char ref[MAX_QPATH + 4];
+					dpsnprintf(ref, sizeof(ref), "pk3:%s", pic);
+					if (!image_file(ref, shot_path, sizeof(shot_path)))
+						shot_path[0] = 0;
+				}
 			}
 			dp_strlcpy(shot, shot_path, sizeof(shot));
 		}
 		jb_kstr(&b, "join_map", known ? map : "");
 		jb_kstr(&b, "levelshot", shot);
+		jb_kstr(&b, "levelshot_kind", !shot[0] ? "" : shot_kind == TJP_PIC_MAP ? "map" : shot_kind == TJP_PIC_LIST ? "list" : "generic");
 		jb_kbool(&b, "world", TouchJoinPreview_Active());
 	}
 	jb_raw(&b, "}");

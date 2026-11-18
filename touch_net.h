@@ -69,6 +69,8 @@ void TouchNet_Frame(double worktime);
 // HTTP downloads on the loading screen (libcurl.c, cl_screen.c): the bytes
 // a download has, and its line with the size and the time left
 void TouchNet_CurlProgress(int index, double bytes);
+// the bytes of download `index` fetched so far (over all its pieces), 0 when unknown
+double TouchNet_CurlBytes(int index);
 // touch_curl.h (in libcurl.c): curl_segments and curl_segment_size
 void TouchCurl_Init(void);
 void TouchNet_CurlText(char *text, size_t size, int index, const char *filename, qbool queued, double progress, double speed);
