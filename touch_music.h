@@ -43,6 +43,11 @@ static inline int TouchMusic_JoinPolicy(int stage, int theme_present, int theme_
      * as it does in the menu. */
     if (map_music)
         return theme_playing ? -1 : 0;
+    /* Never start it during a join: loading the track (and the rescan before
+     * it) stalls the connect and the map load for seconds on a phone. A theme
+     * already playing carries on. */
+    if (stage == TM_STAGE_JOINING)
+        return 0;
     if (!theme_playing && theme_present)
         return 1;
     return 0;

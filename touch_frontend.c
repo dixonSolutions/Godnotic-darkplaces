@@ -423,6 +423,8 @@ static void watch_status(void)
 		fe_event("disconnected", "reason", s + 12, NULL, NULL);
 }
 
+static qbool image_file(const char *ref, char *full, size_t fullsize);
+
 static void publish_connect(qbool force)
 {
 	jb_t b = {0};
@@ -470,7 +472,32 @@ static void publish_connect(qbool force)
 	}
 	jb_kstr(&b, "load", scr_loading ? fe.load_msg : "");
 	jb_knum(&b, "load_progress", scr_loading ? fe.load_fraction : 0);
-	jb_kbool(&b, "local", sv.active);
+	jb_kbool(&b, "local", sv.active || TouchJoinPreview_LocalLoading());
+	// the map's picture for the native card, from the first moment the map is known
+	// (the local game's pick, the server list's row, the serverinfo) until the world draws
+	{
+		char map[MAX_QPATH], shot[MAX_OSPATH] = "";
+		static char shot_map[MAX_QPATH], shot_path[MAX_OSPATH];
+		qbool known = TouchJoinPreview_MapName(map, sizeof(map));
+		if (!known && addr[0] && TouchJoinName_MapFor(addr)[0])
+		{
+			dp_strlcpy(map, TouchJoinName_MapFor(addr), sizeof(map));
+			known = true;
+		}
+		if (known && (cls.connect_trying || cls.state == ca_connected || TouchJoinPreview_LocalLoading()))
+		{
+			if (strcmp(shot_map, map))
+			{
+				dp_strlcpy(shot_map, map, sizeof(shot_map));
+				if (!image_file(map, shot_path, sizeof(shot_path)))
+					shot_path[0] = 0;
+			}
+			dp_strlcpy(shot, shot_path, sizeof(shot));
+		}
+		jb_kstr(&b, "join_map", known ? map : "");
+		jb_kstr(&b, "levelshot", shot);
+		jb_kbool(&b, "world", TouchJoinPreview_Active());
+	}
 	jb_raw(&b, "}");
 	if (dl)
 		Z_Free(dl);
@@ -815,13 +842,13 @@ static void publish_maps(void)
 // extension (.jpg, then .png: what Android decodes), or a bare map name for
 // its preview (maps/<name>). Answered on the queue as an "image" message
 // {ref, path}, path "" when there is none.
-static void publish_image(const char *ref)
+static qbool image_file(const char *ref, char *full, size_t fullsize)
 {
 	static const char *exts[] = {"", ".jpg", ".png", NULL};
-	jb_t b = {0};
-	char base[MAX_QPATH], path[MAX_QPATH], out[MAX_QPATH], full[MAX_OSPATH] = "", safe[MAX_QPATH];
+	char base[MAX_QPATH], path[MAX_QPATH], out[MAX_QPATH], safe[MAX_QPATH];
 	const char *p;
 	int i, n = 0;
+	full[0] = 0;
 	if (!strncmp(ref, "pk3:", 4))
 		dp_strlcpy(base, ref + 4, sizeof(base));
 	else
@@ -838,7 +865,7 @@ static void publish_image(const char *ref)
 			continue; // a bare path is only taken as it is when Android can decode it
 		dpsnprintf(path, sizeof(path), "%s%s", base, exts[i]);
 		dpsnprintf(out, sizeof(out), "fe_cache/%s%s", safe, exts[i]);
-		if (FS_SysFileExists(va(full, sizeof(full), "%s%s", fs_gamedir, out)))
+		if (FS_SysFileExists(va(full, fullsize, "%s%s", fs_gamedir, out)))
 			break;
 		data = FS_LoadFile(path, tempmempool, true, &size);
 		if (!data)
@@ -848,11 +875,19 @@ static void publish_image(const char *ref)
 		}
 		FS_WriteFile(out, data, size);
 		Mem_Free(data);
-		dpsnprintf(full, sizeof(full), "%s%s", fs_gamedir, out);
+		dpsnprintf(full, fullsize, "%s%s", fs_gamedir, out);
 		break;
 	}
 	if (!exts[i])
 		full[0] = 0;
+	return full[0] != 0;
+}
+
+static void publish_image(const char *ref)
+{
+	jb_t b = {0};
+	char full[MAX_OSPATH];
+	image_file(ref, full, sizeof(full));
 	jb_raw(&b, "{");
 	jb_kstr(&b, "ref", ref);
 	jb_kstr(&b, "path", full);
@@ -1605,7 +1640,7 @@ void TouchMusic_Update(void)
         stage = TM_STAGE_DOWNLOAD;
     else
         stage = TM_STAGE_MENU;
-    if (stage != TM_STAGE_GAME && !theme_playing && bgmvolume.value > 0 && host.realtime >= next_check)
+    if (stage != TM_STAGE_GAME && stage != TM_STAGE_JOINING && !theme_playing && bgmvolume.value > 0 && host.realtime >= next_check)
     {
         next_check = TouchMusic_NextCheck(host.realtime, 0);
         // a theme pk3dir the launcher wrote, or a pk3 the app renamed into

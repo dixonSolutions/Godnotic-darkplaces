@@ -138,6 +138,21 @@ static qbool from_list(void)
 	return false;
 }
 
+// the map the server list shows for the server at addr ("" when unknown)
+const char *TouchJoinName_MapFor(const char *addr)
+{
+#ifdef CONFIG_MENU
+	unsigned i;
+	for (i = 0; addr && addr[0] && i < serverlist_cachecount; i++)
+	{
+		serverlist_info_t *info = &serverlist_cache[i].info;
+		if (info->map[0] && !strcmp(info->cname, addr))
+			return info->map;
+	}
+#endif
+	return "";
+}
+
 void TouchJoinName_Frame(void)
 {
 	char addr[128], ask[64];

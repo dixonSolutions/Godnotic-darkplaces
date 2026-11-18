@@ -28,6 +28,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "touch_assist.h" // Touch: server switch for the touch assists
 #include "touch_lua.h" // Touch: Lua mods and plugins
 #include "touch_lan.h" // Touch: the host ended its LAN game
+#include "touch_joinpreview.h" // Touch: the local start names its map
 
 // current client
 client_t *host_client;
@@ -1859,6 +1860,7 @@ void SV_SpawnServer (const char *map)
 	{
 		TouchHUD_LocalGameLoading(); // Touch: CANCEL shows for a local game's map load
 		SCR_BeginLoadingPlaque(false);
+		TouchJoinPreview_SetMap(map); // Touch: the map's picture shows from here (touch_joinpreview.c)
 		S_StopAllSounds();
 	}
 

@@ -48,6 +48,7 @@ static vec3_t jp_org, jp_ang;    // the smoothed camera
 static qbool jp_have_cam;        // jp_org and jp_ang are usable
 static double jp_cam_time;       // when the camera last moved
 static int jp_newmap;            // R_Modules_NewMap in progress (touch_joinpreview_logic.h)
+static char jp_localmap[MAX_QPATH]; // the map a local game is starting (SV_SpawnServer), "" otherwise
 
 #define JP_FOLLOW_DIST 150.0f    // units behind the followed player
 #define JP_FOLLOW_HEIGHT 45.0f   // above their origin
@@ -99,12 +100,37 @@ qbool TouchJoinPreview_Active(void)
 	return true;
 }
 
-// The map being joined, as the serverinfo names it: "maps/foo.bsp" -> "foo".
-static qbool JP_MapName(char *buf, int size)
+// A local game names its map before any server or client exists: the player
+// picked it. SV_SpawnServer says so as the loading plaque goes up; it ends with
+// the plaque (scr_loading).
+void TouchJoinPreview_SetMap(const char *map)
+{
+	dp_strlcpy(jp_localmap, map ? map : "", sizeof(jp_localmap));
+	TouchFE_Loading("", 0); // the native card gets the map now, not at the first load step
+}
+
+static qbool JP_LocalLoading(void)
+{
+	if (!scr_loading)
+		jp_localmap[0] = 0;
+	return jp_localmap[0] != '\0';
+}
+
+qbool TouchJoinPreview_LocalLoading(void)
+{
+	return JP_LocalLoading();
+}
+
+// The map being joined: the local game's pick, else as the serverinfo names it
+// ("maps/foo.bsp" -> "foo").
+qbool TouchJoinPreview_MapName(char *buf, int size)
 {
 	char *dot, *slash;
 	buf[0] = 0;
-	InfoString_GetValue(cl.qw_serverinfo, "map", buf, size);
+	if (JP_LocalLoading())
+		dp_strlcpy(buf, jp_localmap, size);
+	else
+		InfoString_GetValue(cl.qw_serverinfo, "map", buf, size);
 	if (buf[0] == '\0')
 		return false;
 	slash = strrchr(buf, '/');
@@ -115,6 +141,7 @@ static qbool JP_MapName(char *buf, int size)
 		*dot = 0;
 	return buf[0] != '\0';
 }
+#define JP_MapName TouchJoinPreview_MapName
 
 // The levelshot is drawn from the moment the server names a map until the
 // world model is there: the player sees the map they are joining, not a logo,
@@ -123,17 +150,18 @@ qbool TouchJoinPreview_Waiting(void)
 {
 	char map[MAX_QPATH];
 	qbool drawable = false;
+	qbool local = JP_LocalLoading(); // the plaque of a local start covers the menu: it needs no client yet
 	if (!touch_join_preview.integer)
 		return false;
-	if (key_dest != key_game && !TouchFE_MenuHidden())
+	if (!local && key_dest != key_game && !TouchFE_MenuHidden())
 		return false;
-	if (cls.state != ca_connected || cls.signon >= SIGNONS)
+	if (!local && (cls.state != ca_connected || cls.signon >= SIGNONS))
 		return false;
 	if (!scr_refresh.integer || vid_hidden)
 		return false;
 	if (cls.demoplayback || cls.timedemo)
 		return false;
-	if (cl.worldmodel)
+	if (cl.worldmodel && !(local && (cls.state != ca_connected || cls.signon >= SIGNONS))) // a new local map: the old world is not it
 		drawable = TouchJoinPreview_Allowed(TouchJoinPreview_Drawable(1, cl.worldmodel->brush.num_leafs, cl.worldmodel->brush.data_leafs != NULL,
 			cl.worldmodel->num_surfaces, cl.worldmodel->data_surfaces != NULL), jp_newmap) != 0; // inside a newmap the levelshot stays
 	return TouchJoinPreview_ShowsLevelshot(1, 1, JP_MapName(map, sizeof(map)), drawable) != 0;
@@ -143,17 +171,21 @@ qbool TouchJoinPreview_DrawLevelshot(void)
 {
 	static cachepic_t *pic;
 	static char picname[MAX_QPATH];
-	char map[MAX_QPATH], path[MAX_QPATH];
+	char map[MAX_QPATH], path[MAX_QPATH], vabuf[MAX_QPATH];
 	float x, y, w, h, f;
 	float verts[12], texcoords[8];
 	if (!TouchJoinPreview_Waiting())
 		return false;
 	if (!JP_MapName(map, sizeof(map)))
 		return false;
-	dpsnprintf(path, sizeof(path), "levelshots/%s", map);
+	// Xonotic ships a map's picture as maps/<map>.jpg (what the map list shows);
+	// levelshots/<map> is the Quake 3 name and is tried second.
+	dpsnprintf(path, sizeof(path), "maps/%s", map);
 	if (!pic || strcmp(picname, path))
 	{
 		pic = Draw_CachePic(path);
+		if (!pic || Draw_GetPicWidth(pic) < 16)
+			pic = Draw_CachePic(va(vabuf, sizeof(vabuf), "levelshots/%s", map));
 		dp_strlcpy(picname, path, sizeof(picname));
 	}
 	if (!pic)
@@ -161,7 +193,7 @@ qbool TouchJoinPreview_DrawLevelshot(void)
 	w = Draw_GetPicWidth(pic);
 	h = Draw_GetPicHeight(pic);
 	if (w < 16 || h < 16)
-		return false;   // the placeholder for a levelshot this install does not have
+		return false;   // the placeholder for a picture this install does not have
 	// cover the screen, keeping the picture's aspect
 	f = max(vid_conwidth.integer / w, vid_conheight.integer / h);
 	w *= f;

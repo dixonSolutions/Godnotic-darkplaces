@@ -19,6 +19,8 @@ void TouchJoinName_Init(void);
 void TouchJoinName_Frame(void);
 // the name of the server at addr ("" when unknown or another server)
 const char *TouchJoinName_For(const char *addr);
+// the map the server list shows for the server at addr ("" when unknown): the join's picture
+const char *TouchJoinName_MapFor(const char *addr);
 // "name (addr)" when the name of addr is known, else addr
 const char *TouchJoinName_Label(const char *addr, char *buf, size_t size);
 // the answer to our own getinfo: true when the packet was ours (netconn.c drops it,
