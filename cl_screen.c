@@ -1862,6 +1862,8 @@ static void SCR_DrawScreen (void)
 		// Touch: the world renders behind it now, so only the progress stays
 		if (TouchJoinPreview_Active())
 			SCR_DrawLoadingStack();
+		else if (TouchJoinPreview_DrawLevelshot()) // Touch: the map's levelshot until its world is there
+			SCR_DrawLoadingStack(); // Touch: the bar stays over it
 		else
 		// connect_status replaces any dummy_status
 		if ((!loadingscreenstack || loadingscreenstack->msg[0] == '\0') && cl_connect_status[0] != '\0')

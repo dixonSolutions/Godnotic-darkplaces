@@ -445,8 +445,8 @@ static void publish_connect(qbool force)
 	}
 	if (cls.connect_trying)
 		stage = "connecting";
-	else if (TouchJoinPreview_Active())
-		stage = "preview"; // Touch: the world is what shows, the load is a bar (touch_joinpreview.c)
+	else if (TouchJoinPreview_Active() || TouchJoinPreview_Waiting())
+		stage = "preview"; // Touch: the world (or its levelshot) is what shows, the load is a bar (touch_joinpreview.c)
 	else if (cls.state == ca_connected && cls.signon < SIGNONS)
 		stage = n > 0 ? "downloading" : (scr_loading ? "loading" : "signon");
 	else if (scr_loading)

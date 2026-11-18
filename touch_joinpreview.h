@@ -38,6 +38,12 @@ qbool TouchJoinPreview_Camera(void);
 // True once after a preview frame was drawn; read by the load trace
 // (touch_loadtime.c) after the video swap.
 qbool TouchJoinPreview_Drew(void);
+// True while a join names a map but its world is not drawable yet: the map's
+// levelshot is what to show (cl_screen.c) instead of the loading picture.
+qbool TouchJoinPreview_Waiting(void);
+// Draws that levelshot full screen, scaled to fit; false when there is none
+// (no map name yet, a missing levelshot, or the world is drawable already).
+qbool TouchJoinPreview_DrawLevelshot(void);
 
 void TouchJoinPreview_Init(void);
 

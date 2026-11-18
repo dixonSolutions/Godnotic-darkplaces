@@ -19,6 +19,15 @@ static inline int TouchJoinPreview_Drawable(int have_model, int leafs, int leaf_
 	return have_model && leafs > 0 && leaf_data && surfaces > 0 && surface_data;
 }
 
+/* Before the world model is drawable there is still a picture of the map: the
+ * levelshot named after the map the serverinfo already carries. A join that
+ * names a map but has nothing to draw shows that, not the generic loading art.
+ */
+static inline int TouchJoinPreview_ShowsLevelshot(int preview_on, int joining, int map_known, int drawable)
+{
+	return preview_on && joining && map_known && !drawable;
+}
+
 /* The scene always uses the client's current world, never a cached one. */
 static inline int TouchJoinPreview_SceneModel(int current, int cached)
 {

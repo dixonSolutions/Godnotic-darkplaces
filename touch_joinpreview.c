@@ -96,6 +96,95 @@ qbool TouchJoinPreview_Active(void)
 	return true;
 }
 
+// The map being joined, as the serverinfo names it: "maps/foo.bsp" -> "foo".
+static qbool JP_MapName(char *buf, int size)
+{
+	char *dot, *slash;
+	buf[0] = 0;
+	InfoString_GetValue(cl.qw_serverinfo, "map", buf, size);
+	if (buf[0] == '\0')
+		return false;
+	slash = strrchr(buf, '/');
+	if (slash)
+		memmove(buf, slash + 1, strlen(slash + 1) + 1);
+	dot = strrchr(buf, '.');
+	if (dot && !strcmp(dot, ".bsp"))
+		*dot = 0;
+	return buf[0] != '\0';
+}
+
+// The levelshot is drawn from the moment the server names a map until the
+// world model is there: the player sees the map they are joining, not a logo,
+// for the part of the join that loads the rest of the signon.
+qbool TouchJoinPreview_Waiting(void)
+{
+	char map[MAX_QPATH];
+	qbool drawable = false;
+	if (!touch_join_preview.integer)
+		return false;
+	if (key_dest != key_game && !TouchFE_MenuHidden())
+		return false;
+	if (cls.state != ca_connected || cls.signon >= SIGNONS)
+		return false;
+	if (!scr_refresh.integer || vid_hidden)
+		return false;
+	if (cls.demoplayback || cls.timedemo)
+		return false;
+	if (cl.worldmodel)
+		drawable = TouchJoinPreview_Drawable(1, cl.worldmodel->brush.num_leafs, cl.worldmodel->brush.data_leafs != NULL,
+			cl.worldmodel->num_surfaces, cl.worldmodel->data_surfaces != NULL) != 0;
+	return TouchJoinPreview_ShowsLevelshot(1, 1, JP_MapName(map, sizeof(map)), drawable) != 0;
+}
+
+qbool TouchJoinPreview_DrawLevelshot(void)
+{
+	static cachepic_t *pic;
+	static char picname[MAX_QPATH];
+	char map[MAX_QPATH], path[MAX_QPATH];
+	float x, y, w, h, f;
+	float verts[12], texcoords[8];
+	if (!TouchJoinPreview_Waiting())
+		return false;
+	if (!JP_MapName(map, sizeof(map)))
+		return false;
+	dpsnprintf(path, sizeof(path), "levelshots/%s", map);
+	if (!pic || strcmp(picname, path))
+	{
+		pic = Draw_CachePic(path);
+		dp_strlcpy(picname, path, sizeof(picname));
+	}
+	if (!pic)
+		return false;
+	w = Draw_GetPicWidth(pic);
+	h = Draw_GetPicHeight(pic);
+	if (w < 16 || h < 16)
+		return false;   // the placeholder for a levelshot this install does not have
+	// cover the screen, keeping the picture's aspect
+	f = max(vid_conwidth.integer / w, vid_conheight.integer / h);
+	w *= f;
+	h *= f;
+	x = (vid_conwidth.integer - w) / 2;
+	y = (vid_conheight.integer - h) / 2;
+	verts[2] = verts[5] = verts[8] = verts[11] = 0;
+	verts[0] = verts[9] = x;
+	verts[1] = verts[4] = y;
+	verts[3] = verts[6] = x + w;
+	verts[7] = verts[10] = y + h;
+	texcoords[0] = 0; texcoords[1] = 0;
+	texcoords[2] = 1; texcoords[3] = 0;
+	texcoords[4] = 1; texcoords[5] = 1;
+	texcoords[6] = 0; texcoords[7] = 1;
+	GL_BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	GL_DepthRange(0, 1);
+	GL_PolygonOffset(0, 0);
+	GL_DepthTest(false);
+	GL_Color(1, 1, 1, 1);
+	R_Mesh_PrepareVertices_Generic_Arrays(4, verts, NULL, texcoords);
+	R_SetupShader_Generic(Draw_GetPicTexture(pic), true, true, false);
+	R_Mesh_Draw(0, 4, 0, 2, polygonelement3i, NULL, 0, polygonelement3s, NULL, 0);
+	return true;
+}
+
 qbool TouchJoinPreview_Drew(void)
 {
 	qbool drew = jp_drew;
