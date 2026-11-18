@@ -72,10 +72,11 @@ static float TouchUI_ImeHeight(void);
 float TouchUI_ChatKeysTop(void)
 {
 	float ime = TouchUI_ImeHeight();
-	/* The system keyboard covers the bottom: the line being typed is drawn
-	 * above it, as it is above the engine's keys. */
+	/* Report an active chat sheet while the system keyboard is visible. */
 	if (ime > 0 && touchui_chat_keys_top <= 0)
 		return vid_conheight.value - ime;
+	if (vid_touchscreen.integer && touchui_chat_keys_top <= 0)
+		return 1; /* Keep the input visible while the system keyboard is opening. */
 	return touchui_chat_keys_top;
 }
 
@@ -129,6 +130,21 @@ float TouchUI_SheetHeaderHeight(float h)
 {
 	float hdr_h = bound(36.0f, h * 0.10f, 64.0f);
 	return min(max(hdr_h, 48.0f * TouchUI_ConPerDp()), h * 0.16f);
+}
+
+float TouchUI_ChatInputTop(float height)
+{
+	return TouchUI_SheetHeaderHeight(height) + 6.0f;
+}
+
+void TouchUI_PositionChatLog(float *x, float *y)
+{
+	if (vid_touchscreen.integer && key_dest == key_message && scr_numtouchscreenareas > 0)
+	{
+		float size = bound(14.0f, vid_conheight.value * 0.035f, 24.0f);
+		*x = 8.0f;
+		*y = TouchUI_ChatInputTop(vid_conheight.value) + size + 18.0f;
+	}
 }
 
 /*
@@ -993,7 +1009,7 @@ static int TouchUI_LayoutHeader(float x, float y, float w, float h,
 	float th = bound(12.0f, h * 0.42f, 24.0f);
 	float bw, bx;
 	qbool keys = TouchUI_KeysShown(kind);
-	qbool toggle = kind != TOUCHUI_SHEET_PREVIEW;
+	qbool toggle = kind != TOUCHUI_SHEET_PREVIEW && kind != TOUCHUI_SHEET_CHAT;
 	int slots = ((kind == TOUCHUI_SHEET_CHAT) ? 2 : (keys ? 5 : 4)) + (toggle ? 1 : 0);
 	const char *close_lab = (kind == TOUCHUI_SHEET_CHAT) ? "CLOSE CHAT" : "CLOSE";
 
@@ -1306,8 +1322,7 @@ int TouchUI_LayoutSheet(touchui_sheet_t kind, float x, float y, float w, float h
 	touchui_processing_menu = kind == TOUCHUI_SHEET_MENU;
 	if (kind == TOUCHUI_SHEET_MENU)
 		return TouchUI_LayoutMenuKeys(x, y, w, h, out, maxout);
-	/* The system keyboard covers the bottom: the sheet's plates and quick
-	 * phrases stay above it, as they do above the engine's keys. */
+	/* The system keyboard covers the bottom of the sheet. */
 	{
 		float ime = TouchUI_ImeHeight();
 		if (ime > 0 && h > ime + 64.0f)
@@ -1321,7 +1336,7 @@ int TouchUI_LayoutSheet(touchui_sheet_t kind, float x, float y, float w, float h
 	kb_h = TouchUI_KeysHeight(w, h, hdr_h, kb_frac);
 	if (kb_h < 80.0f)
 		kb_h = min(h * 0.5f, 80.0f);
-	/* Chat with a keyboard attached: just the quick phrases, at the bottom. */
+	/* Chat with a system or hardware keyboard needs no on-screen keys. */
 	if (kind == TOUCHUI_SHEET_CHAT && !keys)
 		kb_h = 0;
 	body_top = y + hdr_h;
@@ -1352,36 +1367,6 @@ int TouchUI_LayoutSheet(touchui_sheet_t kind, float x, float y, float w, float h
 	else /* chat */
 	{
 		touchui_chat_keys_top = keys ? y + h - kb_h : -1;
-		/* Quick phrases strip above keyboard */
-		if (body_h > 24.0f)
-		{
-			float strip_h = min(body_h, bound(28.0f, h * 0.10f, 48.0f));
-			int i, cols = min(4, touchui_palette_count);
-			float gap = bound(2.0f, touch_kb_gap.value * w, 12.0f);
-			float cw, th;
-			TouchUI_ReloadPalette();
-			cols = min(4, touchui_palette_count);
-			if (cols > 0)
-			{
-				cw = (w - gap * (float)(cols + 1)) / (float)cols;
-				th = bound(10.0f, strip_h * 0.4f, 18.0f);
-				for (i = 0; i < cols; i++)
-				{
-					/* Prefer say phrases near the end of the builtin list */
-					int idx = touchui_palette_count - cols + i;
-					if (idx < 0)
-						idx = i;
-					TouchUI_PushItem(out, &n, maxout,
-						x + gap + (float)i * (cw + gap),
-						y + h - kb_h - strip_h + gap * 0.5f,
-						cw, strip_h - gap,
-						touchui_palette[idx].label, th,
-						TOUCHUI_STYLE_ACCENT, TOUCHUI_ACT_PALETTE, idx);
-				}
-				if (keys)
-					touchui_chat_keys_top = y + h - kb_h - strip_h;
-			}
-		}
 		if (keys)
 			n = TouchUI_LayoutKeyboard(x, y + h - kb_h, w, kb_h, out, maxout, n);
 	}

@@ -146,6 +146,8 @@ extern struct cvar_s touch_conback_picture;
 /* Top of the chat sheet's keys from the last layout, the system keyboard's top
  * while it is up, or -1 when neither shows. */
 float TouchUI_ChatKeysTop(void);
+float TouchUI_ChatInputTop(float height);
+void TouchUI_PositionChatLog(float *x, float *y);
 /* SCR_SetUpToDrawConsole: the console height, stopped above the touch keys or
  * the system keyboard. */
 float TouchUI_ConsoleHeight(float con_h);

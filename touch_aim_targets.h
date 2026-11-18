@@ -51,6 +51,19 @@ typedef struct touch_aim_cand_s
 	float alpha;    // 0 = drawn solid
 } touch_aim_cand_t;
 
+// Move to the selected aim point in one frame, taking the short way around yaw.
+static void TouchAim_Snap(float yaw, float target_yaw, float target_pitch,
+	float *out_yaw, float *out_pitch)
+{
+	float delta = fmodf(target_yaw - yaw, 360.0f);
+	if (delta > 180.0f)
+		delta -= 360.0f;
+	else if (delta < -180.0f)
+		delta += 360.0f;
+	*out_yaw = yaw + delta;
+	*out_pitch = target_pitch < -89.0f ? -89.0f : target_pitch > 89.0f ? 89.0f : target_pitch;
+}
+
 // The server's anim_state says frozen (Freeze Tag, the ice status effect).
 static qbool TouchAim_AnimFrozen(int anim_state)
 {
@@ -79,6 +92,16 @@ static int TouchAim_TargetCheck(const touch_aim_cand_t *c)
 	if (c->alpha < 0 || (c->alpha > 0 && c->alpha < 0.4f))
 		return TOUCH_AIM_TARGET_UNDRAWN;
 	return TOUCH_AIM_TARGET_OK;
+}
+
+// Record retained targets that still have an eligible CSQC player entity.
+// Visibility and aim-cone tests happen later; missing entities never set a bit.
+static int TouchAim_RetainedSeen(int n, const touch_aim_cand_t *c, int lock, int fire, int rocket)
+{
+	if (!c || TouchAim_TargetCheck(c) != TOUCH_AIM_TARGET_OK)
+		return 0;
+	return (n && n == lock ? 1 : 0) | (n && n == fire ? 2 : 0)
+		| (n && n == rocket ? 4 : 0);
 }
 
 #endif

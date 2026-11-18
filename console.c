@@ -2018,6 +2018,7 @@ void Con_DrawNotify (void)
 			v = chatstart;
 	}
 	height = numChatlines * con_chatsize.value;
+	TouchUI_PositionChatLog(&x, &v); // Touch: keep the open chat log at the top
 
 	if(numChatlines)
 	{
@@ -2027,7 +2028,7 @@ void Con_DrawNotify (void)
 	if (key_dest == key_message)
 	{
 		inputsize = (numChatlines ? con_chatsize : con_notifysize).value;
-		Con_DrawInput(false, x, v, inputsize);
+		if (!(vid_touchscreen.integer && scr_numtouchscreenareas > 0)) Con_DrawInput(false, x, v, inputsize); // Touch: the touch overlay draws it at the top
 	}
 	else
 		chat_bufferpos = 0;

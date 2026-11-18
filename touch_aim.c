@@ -109,28 +109,27 @@ cvar_t cl_touch_practice_seethrough = {CF_CLIENT | CF_ARCHIVE, "cl_touch_practic
 cvar_t cl_touch_practice_360 = {CF_CLIENT | CF_ARCHIVE, "cl_touch_practice_360", "1",
 	"Offline practice (as above): with Targets set to Full 360 (cl_touch_aim_mode 2), enemies all around may be the target, with a marker at the screen edge. Anywhere else Full 360 works as Field of view"};
 cvar_t cl_touch_practice_instant = {CF_CLIENT | CF_ARCHIVE, "cl_touch_practice_instant", "0",
-	"Offline practice (as above): the aim pull moves onto the target at once instead of at cl_touch_aimassist_maxrate. Never anywhere else"};
+	"Legacy setting; aim assist now snaps immediately in all modes, regardless of this value"};
 cvar_t cl_touch_practice_burst = {CF_CLIENT | CF_ARCHIVE, "cl_touch_practice_burst", "0",
 	"Offline practice (as above): a splash shot at an enemy behind cover aims where its simulated flight bursts next to the enemy (over the cover, round it, on the floor by it), "
 	"and fires only while the shot from the view as it is now would burst there (0, the default: the straight line to the enemy must end near it). Never anywhere else"};
 cvar_t cl_touch_aimassist_lastseen = {CF_CLIENT | CF_ARCHIVE, "cl_touch_aimassist_lastseen", "1",
-	"Aim pull, during a fight: when the enemy goes out of sight, keep the crosshair where it was last seen, moving on its last seen course for a second, for up to 3 seconds, while that point is in clear view -- never where it really is behind cover, and never on a wall it went behind"};
+	"Aim assist, during a fight: while the enemy is alive and present, when it goes out of sight, keep the crosshair where it was last seen, moving on its last seen course for a second, for up to 3 seconds, while that point is in clear view -- never where it really is behind cover, and never on a wall it went behind"};
 cvar_t cl_touch_autoshoot_combo = {CF_CLIENT | CF_ARCHIVE, "cl_touch_autoshoot_combo", "1",
 	"Auto-shoot uses two-step fire sequences that do more damage: Electro orbs lobbed at an enemy standing or coming at you, then the bolt that sets them off (with cl_touch_autoshoot_alt)"};
 cvar_t cl_touch_autoshoot_teamsafe = {CF_CLIENT | CF_ARCHIVE, "cl_touch_autoshoot_teamsafe", "1",
 	"Team games: auto-shoot holds fire while a teammate is on the line of the shot or would be inside its blast, and a rocket is not set off next to one"};
 cvar_t cl_touch_aimassist = {CF_CLIENT | CF_ARCHIVE, "cl_touch_aimassist", "1",
-	"Touch controls: aim helpers -- the look drag slows down over an enemy (cl_touch_aimassist_friction) and the view is pulled gently toward one while a finger is on the aim control (cl_touch_aimassist_strength). "
-	"Only in touch mode; never active with a keyboard attached"};
+	"Touch controls: aim helpers -- the look drag slows down over an enemy (cl_touch_aimassist_friction) and the view snaps to the selected living enemy while aiming when snapping is enabled (cl_touch_aimassist_strength). "
+	"Also available with mouse and keyboard when the helpers are enabled"};
 cvar_t cl_touch_aimassist_friction = {CF_CLIENT | CF_ARCHIVE, "cl_touch_aimassist_friction", "0.45",
 	"Aim slowdown: fraction of look speed removed while the crosshair is on an enemy, fading out to the edge of cl_touch_aimassist_cone (0 = off, at most 0.8)"};
 cvar_t cl_touch_aimassist_strength = {CF_CLIENT | CF_ARCHIVE, "cl_touch_aimassist_strength", "0.6",
-	"Aim pull toward the nearest visible enemy inside the cone (where a projectile will meet it) while a finger is on the aim control, while auto-shoot fires at it and while a Devastator rocket flies: "
-	"follows strength x 2 of its motion across the view and closes the gap at strength x 10 per second, or strength x your own turn speed, whichever is faster (0 = off, at most 1)"};
+	"Aim snap: 0 disables snapping; any positive value snaps immediately to the selected aim point while assist is active"};
 cvar_t cl_touch_aimassist_track = {CF_CLIENT | CF_ARCHIVE, "cl_touch_aimassist_track", "1",
 	"Aim pull: follow a fight with the thumb at rest -- keep pulling toward the enemy auto-shoot fired at for a moment after each shot, and let a projectile's lead slide rather than jump when the enemy reverses (0 = pull only while a finger is on the aim control and aiming)"};
 cvar_t cl_touch_aimassist_maxrate = {CF_CLIENT | CF_ARCHIVE, "cl_touch_aimassist_maxrate", "90",
-	"Aim pull: hard cap on the pull, degrees per second (at most 180); it never snaps"};
+	"Legacy setting; aim assist snaps immediately regardless of this value"};
 cvar_t cl_touch_aimassist_cone = {CF_CLIENT | CF_ARCHIVE, "cl_touch_aimassist_cone", "8",
 	"Aim helpers: half-angle in degrees around the crosshair within which an enemy counts as near (1 - 60: up to the whole view)"};
 cvar_t cl_touch_autoshoot_weapons = {CF_CLIENT | CF_ARCHIVE, "cl_touch_autoshoot_weapons", "0",
@@ -170,19 +169,8 @@ cvar_t cl_touch_hud_state = {CF_CLIENT, "_cl_touch_hud_state", "0",
 // Hard ceilings, whatever the cvars say: this runs on public servers.
 #define FRICTION_MAX   0.8f
 #define STRENGTH_MAX   1.0f
-#define MAXRATE_MAX    180.0f
 #define CONE_MAX       60.0f  // the whole view
 #define RADIUS_MAX     15.0f
-// Pull toward the target: the gap (degrees) closes at strength * SETTLE_GAIN
-// per second, 6/s at the default 0.6, so a 5 degree miss is mostly gone in a
-// fifth of a second; and strength * FOLLOW_SCALE of the target's own motion
-// across the view is followed (all of it from strength 0.5).
-#define SETTLE_GAIN    10.0f
-#define SETTLE_GAIN_ROCKET 25.0f
-#define FOLLOW_SCALE   2.0f
-// A target that jumps further than this in one frame (teleport, aim point
-// switching between chest and head) is not followed that frame.
-#define FOLLOW_SPIKE_DEG 5.0f
 // The player is aiming while turning faster than INPUT_MIN_RATE (deg/s) or
 // moving, and for INPUT_HOLD seconds after: long enough to settle a thumb that
 // has just stopped, too short to track anything for a finger left resting.
@@ -191,7 +179,6 @@ cvar_t cl_touch_hud_state = {CF_CLIENT, "_cl_touch_hud_state", "0",
 // The player's own turn counts as heading away from the target only above
 // this rate (deg/s), so the look filter's decaying tail does not cancel the pull.
 #define AWAY_MIN_RATE  5.0f
-#define AWAY_NOISE_RATE 15.0f // slower than this, or sideways, a turn does not stop the pull
 #define LEAVE_RATE     30.0f  // a drag leaving a target this fast is not slowed down
 #define FLICK_RATE     120.0f // a drag this fast is a new look: the old target loses its hold
 #define FLICK_KEEP     1.0f   // seconds after one in which the fight follows the new view
@@ -343,8 +330,7 @@ static struct
 	qbool hud_aim_touch;
 	int debug_target, debug_friend;
 	int said_target, said_weapon, said_mode, said_why;
-	int track_ent;               // target followed last frame, and its view angles
-	float track_yaw, track_pitch;
+	int track_ent;               // target followed last frame
 	track_t tracks[TRACK_MAX];   // per player slot: smoothed velocity
 	// auto-switch
 	int held_last, switch_to;
@@ -857,11 +843,6 @@ typedef struct aimtarget_s
 	qbool hidden;       // behind a wall: only ever a target in offline practice
 } aimtarget_t;
 
-static float signf(float v)
-{
-	return v < 0 ? -1.0f : 1.0f;
-}
-
 // Degrees from the view to the body's edge, given the view's offset from the
 // aim point and the body's angular half-extents: 0 while the crosshair is on it.
 static float edge_err(float ey, float ep, float rh, float rv)
@@ -1218,7 +1199,7 @@ static float priority_bonus(const aimtarget_t *a, const touch_wep_t *wep, const 
 // crosshair (cl_touch_aimassist_priority: shifted by what each is worth),
 // the one held last frame preferred. All must be enemies, alive, drawn, in
 // range and in line of sight.
-static void scan(const vec3_t eye, const vec3_t fwd, float cone, float lock_cone, const touch_wep_t *wep, const touch_wep_fire_t *fire, float latency, qbool slew, qbool guided, qbool collect, int *on_target, int *friend_on, aimtarget_t *near_out)
+static int scan(const vec3_t eye, const vec3_t fwd, float cone, float lock_cone, const touch_wep_t *wep, const touch_wep_fire_t *fire, float latency, qbool slew, qbool guided, qbool collect, int *on_target, int *friend_on, aimtarget_t *near_out)
 {
 	prvm_prog_t *prog = CLVM_prog;
 	int team_game = teamplay_mode();
@@ -1228,7 +1209,7 @@ static void scan(const vec3_t eye, const vec3_t fwd, float cone, float lock_cone
 	float hyst = bound(0.0f, cl_touch_aimassist_hysteresis.value, 15.0f); // degrees the current target is preferred by
 	qbool prio = cl_touch_aimassist_priority.integer != 0;
 	double now = host.realtime;
-	int i, players = 0;
+	int i, players = 0, retained_seen = 0;
 	if (TouchTactics_Open() && cl_touch_practice_exact.integer)
 		range = 1e9f; // offline only: any distance
 	*on_target = 0;
@@ -1270,6 +1251,7 @@ static void scan(const vec3_t eye, const vec3_t fwd, float cone, float lock_cone
 				&& PRVM_clientedictfloat(ed, drawmask) != 0
 				&& !((int)PRVM_clientedictfloat(ed, effects) & EF_NODRAW);
 			cand.alpha = PRVM_clientedictfloat(ed, alpha);
+			retained_seen |= TouchAim_RetainedSeen(n, &cand, ta.lock_ent, ta.fire_target, ta.rk_target);
 			why = TouchAim_TargetCheck(&cand);
 			if (why != TOUCH_AIM_TARGET_OK)
 			{
@@ -1514,6 +1496,7 @@ static void scan(const vec3_t eye, const vec3_t fwd, float cone, float lock_cone
 		}
 		ta.target_since = now;
 	}
+	return retained_seen;
 }
 
 // A teammate the shot about to go would hit or catch (cl_touch_autoshoot_teamsafe),
@@ -2960,7 +2943,7 @@ static void aim_frame(void)
 	qbool autoshoot, assist, aim_touch, manual, locked, guided, pull_target_set = false;
 	float friction, strength, cone, turn_yaw, turn_pitch, turn_mag, radius, pull_yaw = 0, pull_pitch = 0;
 	vec3_t eye, fwd;
-	int on_target, friend_on, on_shoot, shootable, held, mode = TW_MODE_PRIMARY, why = TW_WHY_DEFAULT, mate_block;
+	int on_target, friend_on, on_shoot, shootable, held, retained_seen, mode = TW_MODE_PRIMARY, why = TW_WHY_DEFAULT, mate_block;
 	qbool was_firing = ta.firing || ta.firing2;
 	const touch_wep_t *wep;
 	const touch_wep_fire_t *fire = NULL;
@@ -3120,10 +3103,34 @@ static void aim_frame(void)
 	// a steered rocket is re-aimed in flight: it launches without the slew,
 	// the fall model or the interpolation term, which measured best
 	guided = wep && (wep->flags & TW_GUIDED) && cl_touch_autoshoot_steer.integer;
-	scan(eye, fwd, cone, locked ? cone + LOCK_CONE_EXTRA : 0, wep, fire, fire ? (hitscan_lag > 0 ? hitscan_lag : guided ? latency_estimate() : shot_latency()) : 0,
+	retained_seen = scan(eye, fwd, cone, locked ? cone + LOCK_CONE_EXTRA : 0, wep, fire, fire ? (hitscan_lag > 0 ? hitscan_lag : guided ? latency_estimate() : shot_latency()) : 0,
 		cl_touch_aimassist_track.integer && !guided, guided,
 		cl_touch_autoshoot_group.integer || cl_touch_autoswitch_smart.integer || cl_touch_aimassist_priority.integer,
 		&on_target, &friend_on, &near);
+	// Drop every retained reference before firing, ghost prediction or rocket
+	// steering can use it. A missing CSQC entity is not evidence of life.
+	if (ta.lock_ent && !(retained_seen & 1))
+	{
+		memset(&ta.tracks[ta.lock_ent & (TRACK_MAX - 1)].ghost, 0, sizeof(touch_wep_ghost_t));
+		ta.lock_ent = 0;
+		ta.lock_until = ta.lock_fired = 0;
+		ta.ghost_said = 0;
+	}
+	if (ta.fire_target && !(retained_seen & 2))
+	{
+		set_firing(false, false, 0);
+		ta.fire_target = 0;
+		ta.on_since = 0;
+	}
+	if (ta.rk_target && !(retained_seen & 4))
+	{
+		if (ta.rk_state != RK_IDLE && ta.rk_state != RK_RELEASE)
+		{
+			rk_set(RK_RELEASE, "target no longer eligible");
+			set_firing(false, false, 0);
+		}
+		ta.rk_target = 0;
+	}
 	if (near.entnum && near.err > cone && near.entnum != ta.lock_ent)
 		near.entnum = 0;
 	// the player turned the view away during a fight: the engagement goes on
@@ -3548,15 +3555,7 @@ static void aim_frame(void)
 	else if (friction > 0 && on_target)
 		ta.lookscale = 1.0f - friction;
 
-	// magnetism: with a finger on the aim control (the look area or FIRE)
-	// while the player aims -- turning, moving, or within INPUT_HOLD of
-	// either, so a finger resting on the screen never aims by itself -- and
-	// also while a guided rocket flies, or auto-shoot is firing at that
-	// target (cl_touch_aimassist_track). Never against a turn that is heading away from the target, and
-	// capped per second so it can never snap. Two parts: follow a share of
-	// the target's own motion across the view (it runs, or the player
-	// strafes), and close the remaining gap at a rate that grows with it, so
-	// a thumb that stops a few degrees short or long still lands on the body.
+	// Aim at the selected point immediately while the assist is active.
 	if (turn_mag / dt > INPUT_MIN_RATE || cl.cmd.forwardmove != 0 || cl.cmd.sidemove != 0)
 		ta.last_input = now;
 	// last seen: the enemy of the fight went out of sight and nobody else is
@@ -3628,63 +3627,8 @@ static void aim_frame(void)
 			|| ta.rk_state != RK_IDLE
 			|| (cl_touch_aimassist_track.integer && ta.lock_ent && ta.lock_ent == near.entnum && now < ta.lock_until)))
 	{
-		float ey = wrap180(near.yaw - cl.viewangles[YAW]);
-		float ep = near.pitch - cl.viewangles[PITCH];
-		float turn_rate = turn_mag / dt;
-		// heading away: clearly against the target (not a thumb drifting
-		// sideways, not a slow drift); the pull resumes the first frame the
-		// drag slows down or turns back
-		qbool away = turn_rate > AWAY_NOISE_RATE && (turn_yaw * ey + turn_pitch * ep) < -0.5f * turn_mag * sqrt(ey * ey + ep * ep);
-		if (!away)
-		{
-			float py = 0, pp = 0, len, cap;
-			if (ta.track_ent == near.entnum)
-			{
-				float dy = wrap180(near.yaw - ta.track_yaw), dp = near.pitch - ta.track_pitch;
-				if (fabs(dy) < FOLLOW_SPIKE_DEG && fabs(dp) < FOLLOW_SPIKE_DEG)
-				{
-					float follow = min(1.0f, strength * FOLLOW_SCALE);
-					py = follow * dy;
-					pp = follow * dp;
-				}
-			}
-			// the gap to the inner half of the body: a crosshair on the body's
-			// edge is still drawn in, one well inside it is left alone
-			{
-				float gy = signf(ey) * max(0.0f, fabs(ey) - 0.5f * near.rh);
-				float gp = signf(ep) * max(0.0f, fabs(ep) - 0.5f * near.rv);
-				float gap = sqrt(gy * gy + gp * gp);
-				if (gap > 0.01f)
-				{
-					// a guided rocket's view hold closes faster: the rocket
-					// turns toward the view at 90 deg/s and lags it anyway
-					float rate = strength * max(turn_rate, (ta.rk_state == RK_FLY ? SETTLE_GAIN_ROCKET : SETTLE_GAIN) * gap);
-					float step = min(rate * dt, gap);
-					py += gy / gap * step;
-					pp += gp / gap * step;
-				}
-			}
-			len = sqrt(py * py + pp * pp);
-			cap = bound(0.0f, cl_touch_aimassist_maxrate.value, MAXRATE_MAX) * dt;
-			if (practice.instant)
-			{
-				// offline practice: the whole way at once
-				py = ey;
-				pp = ep;
-				len = sqrt(py * py + pp * pp);
-				cap = len + 1;
-			}
-			if (len > cap)
-			{
-				py *= cap / len;
-				pp *= cap / len;
-			}
-			// never against the finger's own turn: closing the gap is help,
-			// pulling the view back is not
-			TouchWep_PullWithFinger(turn_yaw, turn_pitch, dt, &py, &pp);
-			cl.viewangles[YAW] += py;
-			cl.viewangles[PITCH] = bound(-89.0f, cl.viewangles[PITCH] + pp, 89.0f);
-		}
+		TouchAim_Snap(cl.viewangles[YAW], near.yaw, near.pitch,
+			&cl.viewangles[YAW], &cl.viewangles[PITCH]);
 	}
 	if (cl_touch_aim_debug.integer >= 3)
 	{
@@ -3694,8 +3638,6 @@ static void aim_frame(void)
 		debug_shots(eye, ta.fire_target ? ta.fire_target : ta.lock_ent ? ta.lock_ent : near.entnum);
 	}
 	ta.track_ent = near.entnum;
-	ta.track_yaw = near.yaw;
-	ta.track_pitch = near.pitch;
 
 	VectorCopy(cl.viewangles, ta.prev_angles);
 	ta.prev_valid = true;
