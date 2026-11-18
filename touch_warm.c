@@ -269,8 +269,17 @@ static const char *TW_Target(void)
 	return touch_warm_last.string;
 }
 
+extern qbool scr_loading; // cl_screen.c: a loading screen is up (a map load is under way)
+
 static qbool TW_MayRun(void)
 {
+	// SV_SpawnServer draws the loading plaque (a frame, so this runs) while cls.state is still
+	// ca_disconnected and sv.active is false, before it loads the world itself. Loading the
+	// warm map right there nests one Mod_ForName in the start of the real one: the world
+	// model then half-loads (bogus lightgrid, Host_Error or a NULL texture pool) and the
+	// engine segfaults, in any window size, depending on whether the idle timer expired in that frame.
+	if (scr_loading)
+		return false;
 	if (!touch_warm.integer || tw.dropped)
 		return false;
 	if (cls.state != ca_disconnected || sv.active || cls.demoplayback || key_consoleactive)
