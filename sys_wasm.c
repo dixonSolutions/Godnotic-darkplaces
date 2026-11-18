@@ -165,6 +165,29 @@ EMSCRIPTEN_KEEPALIVE void xt_web_key(int sym)
 	SDL_PushEvent(&ev);
 }
 
+extern cvar_t vid_touchscreen, vid_touchscreen_detected;
+
+/// The value of a cvar, for the page's tests and its dev console.
+EMSCRIPTEN_KEEPALIVE const char *xt_web_cvar_string(const char *name)
+{
+	static char buf[256];
+	dpsnprintf(buf, sizeof(buf), "%s", Cvar_VariableString(&cvars_all, name, ~0));
+	return buf;
+}
+
+/// The page says whether this browser has a touch screen, and whether it has
+/// no fine pointer at all. The engine's own detection (vid_touchdetect.c)
+/// never runs in a browser, so without this a tablet on the web took the
+/// desktop menu and HUD routes. Called at start and again on the first real
+/// touch; never turns a detected touchscreen back off.
+EMSCRIPTEN_KEEPALIVE void xt_web_touch(int touch, int coarse_only)
+{
+	if ((vid_touchscreen_detected.integer != 0) != (touch != 0))
+		Cvar_SetValueQuick(&vid_touchscreen_detected, touch ? 1 : 0);
+	if (touch && coarse_only && !vid_touchscreen.integer)
+		Cvar_SetValueQuick(&vid_touchscreen, 1);
+}
+
 extern qbool cvar_archive_changed; // cvar.c
 
 /// A hash of one bindmap's key bindings, the part of config.cfg that cvar.c
