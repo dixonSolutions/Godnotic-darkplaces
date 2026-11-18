@@ -38,6 +38,7 @@ primary, no lead, no switching.
 #include "touch_weapons.h"
 #include "touch_aim_input.h"
 #include "touch_hook.h"
+#include "touch_spectate.h"
 #include "touch_tactics.h"
 #include "touch_assist.h"
 #include "touch_aim_targets.h"
@@ -2982,8 +2983,7 @@ static void aim_frame(void)
 		return;
 	}
 	if (!ta.was_allowed && cl_touch_aim_debug.integer)
-		Con_Printf("touch aim: active (teamplay %d, my colours %d, %s HUD, %d weapons bound)\n", teamplay_mode(),
-			cl.scores[cl.realplayerentity - 1].colors, TouchHUD_Active() ? "engine" : "CSQC", TouchHUD_NumWeapons());
+		Con_Printf("touch aim: active (teamplay %d, my colours %d, %s HUD, %d weapons bound)\n",			teamplay_mode(), TouchSpec_ScoreIndex(cl.realplayerentity, cl.maxclients, cl.scores != NULL) >= 0 ? cl.scores[cl.realplayerentity - 1].colors : -1, TouchHUD_Active() ? "engine" : "CSQC", TouchHUD_NumWeapons());
 	ta.was_allowed = true;
 	ta.blocked_said = NULL;
 

@@ -293,18 +293,19 @@ static int touchui_spec_shown_count;
 static touchui_specmode_t TouchUI_SpectatorMode(void)
 {
 	int me = cl.realplayerentity;
+	int slot = TouchSpec_ScoreIndex(me, cl.maxclients, cl.scores != NULL);
 	int frags;
 
 	if (cls.state != ca_connected || cls.signon != SIGNONS || cls.demoplayback)
 		return TOUCHUI_SPEC_NONE;
-	if (cl.intermission || !cl.scores || me < 1 || me > cl.maxclients)
+	if (cl.intermission || slot < 0)
 		return TOUCHUI_SPEC_NONE;
 	/* Nexuiz-derived games mark spectators -666 and players out of the round
 	 * -616 / -669 (touch_aim.c, cl_collision.c); a spectator's view is moved to
 	 * the player they watch with svc_setview. The rule, and how it fails toward
 	 * playing, is TouchSpec_StateFrom (touch_spectate.h): its numbers are this
 	 * enum's. */
-	frags = cl.scores[me - 1].frags;
+	frags = cl.scores[slot].frags;
 	return (touchui_specmode_t)TouchSpec_StateFrom(frags, me, cl.viewentity, cl.maxclients, cl.stats[STAT_HEALTH]);
 }
 

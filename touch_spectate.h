@@ -35,6 +35,14 @@ nade or turn.
 #define TOUCHSPEC_OUT       3   // out of the round, following a player
 #define TOUCHSPEC_OUT_FREE  4   // out of the round, free-flying
 
+// The scoreboard slot for the local player, or -1. The scores array is freed
+// with the level and cl.realplayerentity can still point at the old one while a
+// map changes or a round ends; every Touch reader goes through this first.
+static inline int TouchSpec_ScoreIndex(int me, int maxclients, int have_scores)
+{
+	return have_scores && me >= 1 && me <= maxclients ? me - 1 : -1;
+}
+
 // The state from what the client knows of itself: its scoreboard frags (the
 // server marks a spectator -666 and a player out of the round -616, -669
 // since 0.8.6), whose eyes the view is in, and the health stat.

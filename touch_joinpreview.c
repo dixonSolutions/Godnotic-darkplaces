@@ -34,12 +34,14 @@ signon's baselines and the entity updates carry.
 
 #include "quakedef.h"
 #include "touch_joinpreview.h"
+#include "touch_joinpreview_logic.h"
 #include "touch_frontend.h" // TouchFE_MenuHidden: the native menu is not drawn
 
 static cvar_t touch_join_preview = {CF_CLIENT, "touch_join_preview", "1",
 	"draw the world from a spectator camera as soon as a joining client has it, with the load's progress as a bar, instead of the full-screen loading page (Godnotic); 0 = the loading page all the way"};
 
 static int jp_target;            // entity number the camera follows, 0 = none
+static model_t *jp_world;        // the world the camera was chosen in
 static double jp_target_seen;    // last time it moved or fired, or was chosen
 static qbool jp_drew;            // a preview frame was drawn since the last swap
 static vec3_t jp_org, jp_ang;    // the smoothed camera
@@ -73,7 +75,21 @@ qbool TouchJoinPreview_Active(void)
 		return false;
 	if (cls.demoplayback || cls.timedemo)
 		return false;   // a demo or a timedemo has its own view
-	if (!cl.worldmodel || !cl.worldmodel->brush.num_leafs || !cl.worldmodel->brush.data_leafs)
+	if (!cl.worldmodel)
+		return false;
+	// A reconnect or a second join replaces cl.worldmodel. The camera state and
+	// the scene from the old map do not belong to the new one; a scene model left
+	// cached here was drawn after its map was freed (R_Mod_DrawSky).
+	if (cl.worldmodel != jp_world)
+	{
+		jp_world = cl.worldmodel;
+		jp_target = 0;
+		jp_target_seen = 0;
+		jp_have_cam = false;
+		jp_cam_time = 0;
+	}
+	if (!TouchJoinPreview_Drawable(1, cl.worldmodel->brush.num_leafs, cl.worldmodel->brush.data_leafs != NULL,
+		cl.worldmodel->num_surfaces, cl.worldmodel->data_surfaces != NULL))
 		return false;
 	if (key_consoleactive & KEY_CONSOLEACTIVE_FORCED)
 		return false;
@@ -93,8 +109,11 @@ qbool TouchJoinPreview_Drew(void)
 // gets a world entity of its own so the map still shows.
 static void JP_SetScene(void)
 {
-	if (!r_refdef.scene.worldentity && cl.worldmodel)
+	if (cl.worldmodel)
 	{
+		// Always take the current model. Leaving a cached scene.worldentity or
+		// scene.worldmodel in place is a use-after-free when a reconnect or a
+		// second join has replaced the world since the last preview frame.
 		entity_t *world = &cl.entities[0];
 		world->render.model = cl.worldmodel;
 		world->render.matrix = identitymatrix;
@@ -103,9 +122,8 @@ static void JP_SetScene(void)
 		VectorSet(world->render.colormod, 1, 1, 1);
 		VectorSet(world->render.glowmod, 1, 1, 1);
 		r_refdef.scene.worldentity = &world->render;
-	}
-	if (!r_refdef.scene.worldmodel)
 		r_refdef.scene.worldmodel = cl.worldmodel;
+	}
 	r_refdef.scene.time = cl.time;
 }
 
