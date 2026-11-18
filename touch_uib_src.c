@@ -49,6 +49,17 @@ typedef struct
 	int nparams;
 	int64_t notified_rev;
 	int lasttotal;
+	// The filtered/sorted row order of this revision, reused by every window
+	// request until the source, sort or filter changes: one qsort per revision
+	// instead of one per request (the visible window and the QuakeC renderer can
+	// ask for the same rows in the same frame).
+	int *ord;
+	int ordcount;
+	int64_t ordrev;
+	int orddesc;
+	char ordsort[64];
+	char ordfilter[257];
+	int ordvalid;
 } source_t;
 
 static source_t sources[MAX_SOURCES];
@@ -57,6 +68,9 @@ static source_t *building;
 
 static void freerows(source_t *s)
 {
+	free(s->ord);
+	s->ord = NULL;
+	s->ordvalid = 0;
 	for (int i = 0; i < s->nrows; i++)
 	{
 		for (int c = 0; c < s->rows[i].ncells; c++)
@@ -572,22 +586,37 @@ static int row_matches(const uibrow_t *r, const char *filter)
 // The visible order: indices into s->rows, filtered and sorted.
 static int *order(source_t *s, const char *sort, int desc, const char *filter, int *count)
 {
-	int *idx = (int *)malloc(sizeof(int) * (s->nrows + 1));
+	if (!sort) sort = "";
+	if (!filter) filter = "";
+	if (s->kind == 1 && !*sort)
+		sort = "ping";
+	if (s->ordvalid && s->ordrev == s->rev && s->orddesc == !!desc
+		&& !strcmp(s->ordsort, sort) && !strcmp(s->ordfilter, filter))
+	{
+		*count = s->ordcount;
+		return s->ord;
+	}
+	free(s->ord);
+	s->ord = (int *)malloc(sizeof(int) * (s->nrows + 1));
 	int n = 0;
 	for (int i = 0; i < s->nrows; i++)
 		if (row_matches(&s->rows[i], filter))
-			idx[n++] = i;
-	if (s->kind == 1 && (!sort || !*sort))
-		sort = "ping";
-	if (sort && *sort)
+			s->ord[n++] = i;
+	if (*sort)
 	{
 		sortkey = sort;
 		sortdesc = desc;
 		sortsrc = s;
-		qsort(idx, n, sizeof(int), cmp_rows);
+		qsort(s->ord, n, sizeof(int), cmp_rows);
 	}
+	s->ordcount = n;
+	s->ordrev = s->rev;
+	s->orddesc = !!desc;
+	dp_strlcpy(s->ordsort, sort, sizeof(s->ordsort));
+	dp_strlcpy(s->ordfilter, filter, sizeof(s->ordfilter));
+	s->ordvalid = 1;
 	*count = n;
-	return idx;
+	return s->ord;
 }
 
 static void row_json(uibbuf_t *b, const uibrow_t *r)
@@ -655,7 +684,6 @@ void UIBSrc_Window(uibbuf_t *b, int msgid, int64_t re, const char *source, int o
 		row_json(b, &s->rows[idx[i]]);
 	}
 	UIBB_Puts(b, "]}");
-	free(idx);
 }
 
 // ---------------------------------------------------------------- the QuakeC renderer's window
@@ -670,8 +698,7 @@ static struct
 int UIBSrc_LocalWindow(const char *source, int offset, int limit, const char *sort, int desc, const char *filter)
 {
 	source_t *s = getsource(source, 1);
-	free(lw.idx);
-	memset(&lw, 0, sizeof(lw));
+	memset(&lw, 0, sizeof(lw)); // idx points into the source's order cache, never freed here
 	if (!s)
 		return 0;
 	refresh(s, 0);
@@ -722,6 +749,5 @@ void UIBSrc_Reset(void)
 	for (int i = 0; i < nsources; i++)
 		freerows(&sources[i]), free(sources[i].rows);
 	nsources = 0;
-	free(lw.idx);
 	memset(&lw, 0, sizeof(lw));
 }
