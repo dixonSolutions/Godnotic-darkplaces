@@ -894,7 +894,7 @@ void Memory_Init (void)
 		mem_mutex = Thread_CreateMutex();
 }
 
-#if defined(__ANDROID__) && defined(ANDYSU_SWAP)
+#ifdef ANDYSU_SWAP
 // Live engine swap: the library stays mapped after its engine shut down, so release everything the
 // engine allocated (an exit() would have). Nothing may allocate from the pools afterwards.
 void Mem_FreeAllPools(void)

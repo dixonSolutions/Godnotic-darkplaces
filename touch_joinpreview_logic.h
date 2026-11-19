@@ -55,7 +55,8 @@ static inline int TouchJoinPreview_PictureChoice(int have_map, int have_list, in
 		return TJP_PIC_MAP;
 	if (have_list)
 		return TJP_PIC_LIST;
-	return have_generic ? TJP_PIC_GENERIC : TJP_PIC_NONE;
+	(void)have_generic;
+	return TJP_PIC_NONE;
 }
 
 /* Brightness of the picture: the generic one is dimmed so it reads as a backdrop. */

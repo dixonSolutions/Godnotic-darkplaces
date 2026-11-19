@@ -15,39 +15,22 @@ static inline int TouchMusic_Policy(int in_game, int theme_present, int playing)
     return 0;
 }
 
-/* Stages of a game start. The theme is the music of a menu, a connect, a
- * download, a load and a join preview; the match owns the music from its first
- * playable frame, and its map or server may bring a track of its own. */
+/* The menu theme stops during a join; the map owns its music. */
 #define TM_STAGE_MENU 0
 #define TM_STAGE_JOINING 1
 #define TM_STAGE_GAME 2
 #define TM_STAGE_DOWNLOAD 3
 
-/* -1: stop the theme, 0: leave it alone, 1: start it.
- *
- * A join keeps the theme playing until the map's own music arrives: a `cd loop`
- * from the map or the server replaces the stream, so `map_music` says the theme
- * has nothing left to do and the new track takes over (the mixer fades it in).
- * In a match the normal rules apply: the theme stops, unless the map has no
- * music at all and the player allows the theme to stay.
- */
+/* -1: stop the theme, 0: leave it alone, 1: start it. */
 static inline int TouchMusic_JoinPolicy(int stage, int theme_present, int theme_playing, int map_music, int allow_in_game)
 {
-    if (stage == TM_STAGE_GAME)
-    {
-        if (!theme_playing)
-            return 0;
-        return (!map_music && allow_in_game) ? 0 : -1;
-    }
+    (void)allow_in_game;
+    if (stage == TM_STAGE_JOINING || stage == TM_STAGE_GAME)
+        return theme_playing ? -1 : 0;
     /* The data-download screen is not a match: the theme belongs there just
      * as it does in the menu. */
     if (map_music)
         return theme_playing ? -1 : 0;
-    /* Never start it during a join: loading the track (and the rescan before
-     * it) stalls the connect and the map load for seconds on a phone. A theme
-     * already playing carries on. */
-    if (stage == TM_STAGE_JOINING)
-        return 0;
     if (!theme_playing && theme_present)
         return 1;
     return 0;

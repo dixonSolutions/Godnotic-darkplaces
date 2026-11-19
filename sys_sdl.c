@@ -18,12 +18,12 @@
 // General routines
 // =======================================================================
 
-#if defined(__ANDROID__) && defined(ANDYSU_SWAP)
+#ifdef ANDYSU_SWAP
 extern int andysu_swapping;
 #endif
 void Sys_SDL_Shutdown(void)
 {
-#if defined(__ANDROID__) && defined(ANDYSU_SWAP)
+#ifdef ANDYSU_SWAP
 	if (andysu_swapping)
 		return; // SDL is shared with the next engine copy and stays initialised
 #endif

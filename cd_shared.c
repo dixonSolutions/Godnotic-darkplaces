@@ -153,6 +153,8 @@ static void CDAudio_Play_byName (const char *trackname, qbool looping, qbool try
 	else
 		track = 0;
 
+	{ extern qbool TouchMusic_BlockTrack(const char *); if (TouchMusic_BlockTrack(trackname)) return; } // Touch: never start the menu theme during a join or game
+
 	// div0: I assume this code was intentionally there. Maybe turn it into a cvar?
 	if (cdPlaying && cdPlayTrack == track && faketrack == -1)
 		return;
@@ -638,3 +640,5 @@ void CDAudio_Shutdown (void)
 	CDAudio_Stop();
 	initialized = false;
 }
+
+#include "touch_music_cd.h" // Touch: start map music during a join

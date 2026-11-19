@@ -34,11 +34,14 @@ static cvar_t touch_join_label = {CF_CLIENT | CF_READONLY, "_touch_join_label", 
 #define JN_ASKS 4           // getinfo tries (a server blocks a second getinfo from one address within 1 s)
 #define JN_ASK_EVERY 1.25   // seconds between them
 
+extern void TouchCurl_ClearJoinShot(void);
+
 static struct
 {
 	char address[128];  // LHNETADDRESS_ToString of the server
 	lhnetaddress_t peer;
 	char name[128];
+	char map[MAX_QPATH];
 	char token[32];     // the challenge of our getinfo
 	qbool replied;
 	int asks;
@@ -138,23 +141,16 @@ static qbool from_list(void)
 	return false;
 }
 
-// the map the server list shows for the server at addr ("" when unknown)
+// Only a fresh response to this join can establish its map. Server-list rows
+// may have been populated before a map vote or a reconnect.
 const char *TouchJoinName_MapFor(const char *addr)
 {
-#ifdef CONFIG_MENU
-	unsigned i;
-	for (i = 0; addr && addr[0] && i < serverlist_cachecount; i++)
-	{
-		serverlist_info_t *info = &serverlist_cache[i].info;
-		if (info->map[0] && !strcmp(info->cname, addr))
-			return info->map;
-	}
-#endif
-	return "";
+	return addr && !strcmp(addr, tjn.address) && tjn.replied ? tjn.map : "";
 }
 
 void TouchJoinName_Frame(void)
 {
+	static qbool was_trying;
 	char addr[128], ask[64];
 	lhnetaddress_t *peer = NULL;
 	lhnetsocket_t *sock = NULL;
@@ -162,6 +158,7 @@ void TouchJoinName_Frame(void)
 		return;
 	if (sv.active || cls.demoplayback)
 	{
+		was_trying = false;
 		// a local game (hosted on LAN or not) or a demo: no server to name
 		forget();
 		return;
@@ -178,15 +175,19 @@ void TouchJoinName_Frame(void)
 	}
 	// not joining: the last server keeps its name (Could not join, a reconnect)
 	if (!peer)
+	{
+		was_trying = false;
 		return;
+	}
 	if (LHNETADDRESS_GetAddressType(peer) == LHNETADDRESSTYPE_LOOP)
 	{
 		forget();
 		return;
 	}
 	LHNETADDRESS_ToString(peer, addr, sizeof(addr), true);
-	if (strcmp(addr, tjn.address))
+	if (strcmp(addr, tjn.address) || (cls.connect_trying && !was_trying))
 	{
+		TouchCurl_ClearJoinShot();
 		memset(&tjn, 0, sizeof(tjn));
 		dp_strlcpy(tjn.address, addr, sizeof(tjn.address));
 		tjn.peer = *peer;
@@ -194,16 +195,14 @@ void TouchJoinName_Frame(void)
 		tjn.next_ask = tjn.next_list = host.realtime;
 		publish();
 	}
-	if (tjn.name[0] || tjn.replied)
+	was_trying = cls.connect_trying;
+	if (tjn.replied)
 		return;
 	if (host.realtime >= tjn.next_list)
 	{
 		tjn.next_list = host.realtime + 0.5;
-		if (from_list())
-		{
+		if (!tjn.name[0] && from_list())
 			publish();
-			return;
-		}
 	}
 	if (sock && tjn.asks < JN_ASKS && host.realtime >= tjn.next_ask)
 	{
@@ -225,6 +224,8 @@ qbool TouchJoinName_Connectionless(const char *string, int length, lhnetaddress_
 	if (!peeraddress || LHNETADDRESS_Compare(peeraddress, &tjn.peer))
 		return true;
 	tjn.replied = true;
+	InfoString_GetValue(string + 13, "mapname", tjn.map, sizeof(tjn.map));
+	if (!tjn.map[0]) InfoString_GetValue(string + 13, "map", tjn.map, sizeof(tjn.map));
 	if (!tjn.name[0] && InfoString_GetValue(string + 13, "hostname", host_name, sizeof(host_name)))
 	{
 		TouchJoinName_Clean(host_name, tjn.name, sizeof(tjn.name));

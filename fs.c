@@ -4523,3 +4523,4 @@ unsigned char *FS_Inflate(const unsigned char *data, size_t size, size_t *inflat
 
 	return out;
 }
+#include "touch_zipinflate.h" // Touch: bounded ZIP preview inflation

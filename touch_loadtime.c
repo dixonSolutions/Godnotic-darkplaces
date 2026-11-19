@@ -39,7 +39,7 @@ as they arrive. Neither applies in the menu or in the game.
 #include "touch_loadcvar.h"
 #include "touch_net.h"
 #include "image.h"
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(ANDYSU_SWAP)
 #include "andysu_engine.h"
 #endif
 #ifdef __linux__
@@ -290,7 +290,7 @@ void TouchLoadTime_Frame(void)
 	double now = Sys_DirtyTime();
 	int i;
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(ANDYSU_SWAP)
 	Andysu_DrawnFrame(now, host.state == host_active, tlt_world_drawn);
 #endif
 

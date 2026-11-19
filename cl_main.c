@@ -592,6 +592,7 @@ void CL_EstablishConnection(const char *address, int firstarg)
 	if (LHNETADDRESS_FromString(&cls.connect_address, address, 26000) && (cls.connect_mysocket = NetConn_ChooseClientSocketForAddress(&cls.connect_address)))
 	{
 		cls.connect_trying = true;
+		{ extern void TouchMusic_BeginJoin(void); TouchMusic_BeginJoin(); } // Touch: stop old music before connection work
 		cls.connect_remainingtries = 10;
 		cls.connect_nextsendtime = 0;
 

@@ -57,6 +57,8 @@ typedef struct tc_dl_s
 }
 tc_dl_t;
 
+#include "touch_curlshot.h"
+
 static tc_dl_t *tc_list;
 static int touchcurl_ok;
 
@@ -254,6 +256,7 @@ static void TouchCurl_Frame(void)
 	tc_dl_t *d;
 	int i;
 	long code;
+	TS_Frame();
 	if (curl_segments.integer < 2 || curl_maxspeed.value > 0)
 		return;
 	List_For_Each_Entry(di, &downloads, downloadinfo, list)
@@ -307,6 +310,7 @@ static qbool TouchCurl_Done(CURL *curle, CURLcode result)
 {
 	tc_dl_t *d;
 	int i;
+	if (TS_Done(curle, result)) return true;
 	for (d = tc_list; d; d = d->next)
 	{
 		if (d->confirmed && d->di->curle == curle)
@@ -361,6 +365,7 @@ static downloadinfo *TouchCurl_Finished(void)
 static void TouchCurl_End(downloadinfo *di)
 {
 	tc_dl_t **p, *d;
+	TS_End(di);
 	for (p = &tc_list; (d = *p); p = &d->next)
 	{
 		if (d->di == di)

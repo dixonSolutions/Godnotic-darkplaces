@@ -492,8 +492,7 @@ static void publish_connect(qbool force)
 	jb_knum(&b, "load_progress", scr_loading ? fe.load_fraction : 0);
 	jb_kbool(&b, "local", sv.active || TouchJoinPreview_LocalLoading());
 	// the map's picture for the native card, from the first moment of a join until the
-	// world draws: the map's own, else what the server list's map name finds, else a
-	// generic map picture (levelshot_kind says which; the card dims and blurs the last)
+	// world draws: only the named map's own picture, if available.
 	{
 		char map[MAX_QPATH], shot[MAX_OSPATH] = "", pic[MAX_QPATH];
 		static char shot_name[MAX_QPATH], shot_path[MAX_OSPATH];
@@ -1646,6 +1645,61 @@ void TouchFE_Init(void)
  * session. Asking again every half second, then every five, is what makes a
  * music pack that lands late play.
  */
+/* A join may render a world preview before the server's cd command arrives.
+ * Start the mapinfo track as soon as its file is mounted; the server remains
+ * free to replace it with its own command. */
+extern void TouchMusic_PlayTrack(const char *track);
+extern unsigned TouchCurl_JoinShotGeneration(void);
+void TouchMusic_BeginJoin(void)
+{
+    if (CDAudio_IsPlaying())
+    {
+        if (TouchMusic_IsTheme(CDAudio_CurrentTrack())) Con_Printf("MUSIC: stop menu theme for join or match\n");
+        CDAudio_Stop();
+    }
+}
+
+void TouchMusic_EnsureMap(void)
+{
+    static char lastmap[MAX_QPATH];
+    static unsigned lastgen;
+    static double next;
+    char map[MAX_QPATH], path[MAX_QPATH], track[MAX_QPATH];
+    fs_offset_t size;
+    unsigned char *data;
+    char *line, *end;
+    unsigned gen = TouchCurl_JoinShotGeneration();
+    if (CDAudio_IsPlaying() || !TouchJoinPreview_MapName(map, sizeof(map))) return;
+    if (gen != lastgen || strcmp(lastmap, map)) { lastgen = gen; dp_strlcpy(lastmap, map, sizeof(lastmap)); next = 0; }
+    if (Sys_DirtyTime() < next) return;
+    next = Sys_DirtyTime() + 0.5;
+    if (strspn(map, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-") != strlen(map)) return;
+    dpsnprintf(path, sizeof(path), "maps/%s.mapinfo", map);
+    data = FS_LoadFile(path, tempmempool, true, &size);
+    if (!data) return;
+    if (size > 65536) { Mem_Free(data); return; }
+    for (line = (char *)data; *line; line = end)
+    {
+        char *p; size_t n;
+        end = strchr(line, '\n');
+        if (end) *end++ = 0; else end = line + strlen(line);
+        while (*line == ' ' || *line == '\t') line++;
+        if (strncmp(line, "cdtrack", 7) || (line[7] != ' ' && line[7] != '\t')) continue;
+        p = line + 7; while (*p == ' ' || *p == '\t') p++;
+        n = strspn(p, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-/.");
+        if (!n || n >= sizeof(track) || strstr(p, "..")) break;
+        memcpy(track, p, n); track[n] = 0;
+        TouchMusic_PlayTrack(track);
+        break;
+    }
+    Mem_Free(data);
+}
+
+qbool TouchMusic_BlockTrack(const char *track)
+{
+    return TouchMusic_IsTheme(track) && (TouchJoinPreview_LocalLoading() || cls.connect_trying || cls.state == ca_connected);
+}
+
 void TouchMusic_Update(void)
 {
     static double next_check;
@@ -1661,16 +1715,18 @@ void TouchMusic_Update(void)
     qbool map_music = (playing && !theme_playing) || music_playlist_active >= 0;
     qbool present = false;
     int action;
-    // connecting, downloading, loading and the join preview are not a match:
-    // the theme keeps playing through all of them, until the map brings music
-    if (cls.state == ca_connected && cls.signon == SIGNONS)
+    // Stop the menu theme as soon as a local or remote join starts.
+    if (TouchJoinPreview_LocalLoading() || cls.connect_trying)
+        stage = TM_STAGE_JOINING;
+    else if (cls.state == ca_connected && cls.signon == SIGNONS)
         stage = TM_STAGE_GAME;
-    else if (cls.connect_trying || cls.state != ca_disconnected)
+    else if (cls.state != ca_disconnected)
         stage = TM_STAGE_JOINING;
     else if (TouchData_Downloading())
         stage = TM_STAGE_DOWNLOAD;
     else
         stage = TM_STAGE_MENU;
+    if (stage == TM_STAGE_JOINING && !playing) TouchMusic_EnsureMap();
     if (stage != TM_STAGE_GAME && stage != TM_STAGE_JOINING && !theme_playing && bgmvolume.value > 0 && host.realtime >= next_check)
     {
         next_check = TouchMusic_NextCheck(host.realtime, 0);
@@ -1716,8 +1772,8 @@ void TouchMusic_Update(void)
         asked_before = false;
         said_retry = false;
         said_handover = false;
-        Cbuf_AddText(cmd_local, "\ncd stop\n");
-        Con_Printf("MUSIC: stop menu theme for match\n");
+        CDAudio_Stop();
+        Con_Printf("MUSIC: stop menu theme for join or match\n");
     }
     else if (action < 0 && !said_handover)
     {

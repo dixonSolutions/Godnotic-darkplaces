@@ -34,7 +34,7 @@
 
 static cvar_t touch_preload = {CF_CLIENT, "touch_preload", "1", "load what earlier games on this map loaded late (models, sounds, GLSL shaders) under the loading screen before the first game frame, and record what this game loads late (Godnotic); 0 = neither"};
 static cvar_t touch_preload_budget = {CF_CLIENT, "touch_preload_budget", "4000", "milliseconds the preload may add to a map load at most"};
-static cvar_t touch_preload_defer = {CF_CLIENT, "touch_preload_defer", "0", "defer seed work and remote replay models to menu render frames (experimental)"};
+static cvar_t touch_preload_defer = {CF_CLIENT, "touch_preload_defer", "1", "defer seed work and remote replay models to menu render frames"};
 static cvar_t touch_preload_seed_budget = {CF_CLIENT, "touch_preload_seed_budget", "400", "milliseconds of seed work during loading (one asset may exceed the budget)"};
 static cvar_t touch_preload_frame_budget = {CF_CLIENT, "touch_preload_frame_budget", "8", "milliseconds per frame for deferred seed work while a menu is open (one asset may exceed the budget)"};
 static cvar_t touch_preload_keep = {CF_CLIENT, "touch_preload_keep", "4", "an entry of a map's preload list is dropped once that many games on the map did not need it"};

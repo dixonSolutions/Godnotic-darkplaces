@@ -38,7 +38,7 @@
 #include "thread.h"
 #include "libcurl.h"
 #include "touch_exit.h" // Touch: how Android leaves the process
-#if defined(__ANDROID__) && defined(ANDYSU_SWAP)
+#ifdef ANDYSU_SWAP
 #include "andysu_engine.h"
 #endif
 
@@ -788,7 +788,7 @@ void Sys_Error (const char *error, ...)
 	// don't want a dead window left blocking the OS UI or the abort dialog
 	VID_Shutdown();
 	S_StopAllSounds();
-#if defined(__ANDROID__) && defined(ANDYSU_SWAP)
+#ifdef ANDYSU_SWAP
 	Andysu_AbortStart(string); // trial of a swapped-in engine: longjmp to the loader, does not return
 #endif
 
@@ -1179,7 +1179,7 @@ static void Sys_Frame(void)
 	if (setjmp(host.abortframe)) // Something bad happened, or the server disconnected
 		host.state = host_active; // In case we were loading
 
-#if defined(__ANDROID__) && defined(ANDYSU_SWAP)
+#ifdef ANDYSU_SWAP
 	Andysu_FrameHook(); // loader asked for a swap? then host.state becomes host_shutdown
 #endif
 
@@ -1192,7 +1192,7 @@ static void Sys_Frame(void)
 		Sys_AllowProfiling(false);
 #endif
 		Host_Shutdown();
-#if defined(__ANDROID__) && defined(ANDYSU_SWAP)
+#ifdef ANDYSU_SWAP
 		if (andysu_swapping)
 		{
 			andysu_leave = true; // swap: return to the loader, no exit()
@@ -1278,7 +1278,7 @@ int Sys_Main(int argc, char *argv[])
 #ifdef __EMSCRIPTEN__
 	emscripten_set_main_loop(Sys_Frame, 0, true); // doesn't return
 #else
-#if defined(__ANDROID__) && defined(ANDYSU_SWAP)
+#ifdef ANDYSU_SWAP
 	while(!andysu_leave)
 		Sys_Frame();
 	return ANDYSU_RUN_SWAP;
