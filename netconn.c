@@ -31,6 +31,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "touch_net.h" // Touch: windowed reliable channel, fast signon
 #include "touch_srvlist.h" // Touch: the fast server list
 #include "touch_joinname.h" // Touch: the joined server's name
+#include "touch_netkeep.h" // Touch: the connection outlives a long frame
 #include <time.h>
 
 #define QWMASTER_PORT 27000
@@ -1084,6 +1085,7 @@ qbool NetConn_HaveServerPorts(void)
 
 void NetConn_CloseClientPorts(void)
 {
+	TouchNetKeep_PortsClosing(); // Touch: the keepalive watcher lets go of the sockets
 	for (;cl_numsockets > 0;cl_numsockets--)
 		if (cl_sockets[cl_numsockets - 1])
 			LHNET_CloseSocket(cl_sockets[cl_numsockets - 1]);

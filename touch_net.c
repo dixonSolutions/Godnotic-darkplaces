@@ -46,6 +46,8 @@ the wire format and the measurements.
 #include "touch_net.h"
 #include "touch_lan.h"
 #include "touch_joinname.h" // "name (address)" in the reconnect lines
+#include "touch_netkeep.h" // the connection outlives a long frame
+#include "touch_netdl.h" // in-order download acks
 
 #if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
 #include <sys/select.h>
@@ -150,6 +152,7 @@ static tn_conn_t *TN_Create(netconn_t *conn, int window)
 void TouchNet_Close(netconn_t *conn)
 {
 	tn_conn_t **p, *t;
+	TouchNetKeep_Closing(conn);
 	for (p = &tn_list; (t = *p); p = &t->next)
 	{
 		if (t->conn == conn)
@@ -889,6 +892,7 @@ void TouchNet_Frame(double worktime)
 {
 	if (cls.state == ca_dedicated)
 		return;
+	TouchNetKeep_Frame();
 	TN_StayConnected();
 	if (!touch_net_trace.integer)
 		return;
@@ -977,23 +981,32 @@ void TouchNet_TracePacket(lhnetsocket_t *mysocket, const void *data, int length,
 ==============
 Staying connected: reconnect, away
 ==============
-A connection that is lost (timed out, or silent for net_reconnect_silence
-seconds; 3 s after this device's address changed or its frames stopped,
-as when Android froze the app) is joined again automatically, with the
-same address and, for a LAN game, the password typed this session. A
-server that sends the player away (kick, shutdown, full) is not: its
-reason stays in _net_reconnect_state for the UI. Away in the background
-(Android, touch_android.c), the player goes to the spectators after
-net_away_spectate seconds and back into the game on return, and is
-disconnected cleanly after net_away_limit seconds.
+A connection that is lost is joined again automatically, with the same
+address and, for a LAN game, the password typed this session. Lost means:
+timed out; dropped by the server while this process was frozen; silent for
+net_reconnect_silence seconds (60 at least); silent for TN_FROZEN_SILENCE
+seconds just after the frames stopped for TN_FROZEN (the server may have
+dropped us and its word got lost); silent for TN_MOVED_SILENCE seconds while
+this device's address differs from the one it joined from (Wi-Fi to mobile
+data: the server cannot reach us). A long frame is not a loss: the server
+keeps hearing from us (touch_netkeep.c), and the silence is judged as of a
+frame's start. A server that sends the player away (kick, shutdown, full) is
+not joined again: its reason stays in _net_reconnect_state for the UI. Away
+in the background (Android, touch_android.c), the player goes to the
+spectators after net_away_spectate seconds and back into the game on
+return, and is disconnected cleanly after net_away_limit seconds.
 */
 
 static cvar_t net_reconnect = {CF_CLIENT | CF_ARCHIVE, "net_reconnect", "1", "join the same server again automatically when the connection is lost (Godnotic)"};
 static cvar_t net_reconnect_tries = {CF_CLIENT | CF_ARCHIVE, "net_reconnect_tries", "5", "automatic reconnect attempts, 1 s, 2 s, 4 s ... apart"};
-static cvar_t net_reconnect_silence = {CF_CLIENT | CF_ARCHIVE, "net_reconnect_silence", "30", "seconds without a packet from the server before the connection counts as lost (3 after the address changed or the game was frozen); 0 = only the stock timeout"};
+static cvar_t net_reconnect_silence = {CF_CLIENT | CF_ARCHIVE, "net_reconnect_silence", "60", "seconds without a packet from the server before reconnecting (minimum 60); 0 = only the stock timeout"};
 static cvar_t net_reconnect_state = {CF_CLIENT | CF_READONLY, "_net_reconnect_state", "", "empty, or what the automatic reconnect is doing or why it gave up (for the UI)"};
 static cvar_t net_away_spectate = {CF_CLIENT | CF_ARCHIVE, "net_away_spectate", "20", "seconds in the background in a match before going to the spectators (back into the game on return); 0 = stay a player"};
 static cvar_t net_away_limit = {CF_CLIENT | CF_ARCHIVE, "net_away_limit", "600", "seconds connected in the background before disconnecting cleanly; 0 = no limit"};
+
+#define TN_FROZEN 20          // frames stopped this long: a Xonotic server (30 s timeouts) may have dropped us
+#define TN_FROZEN_SILENCE 5   // after that, this much silence in the game means it did
+#define TN_MOVED_SILENCE 6    // this device's address changed and the server is this quiet: it cannot reach us
 
 static struct
 {
@@ -1002,8 +1015,9 @@ static struct
 	double next;          // realtime of the next attempt; 0 = none planned
 	qbool user;           // the player disconnected or cancelled
 	char localip[64];     // this device's address toward the server
+	char joinip[64];      // ... when this connection was made
 	double next_check;
-	double quick_until;   // short silence limit until then (Sys_DirtyTime: after a freeze)
+	double quick_until;   // Sys_DirtyTime: after a freeze the server may have dropped us (TN_FROZEN)
 	double last_frame;
 	qbool away;
 	double away_since;
@@ -1128,8 +1142,6 @@ void TouchNet_Away(qbool away)
 		Cbuf_AddText(cmd_local, "cmd join\n");
 	}
 	tn_rc.spectated = false;
-	// a frozen process may have missed packets: listen closely for a while
-	tn_rc.quick_until = Sys_DirtyTime() + 10;
 }
 
 static void TouchNet_Away_f(cmd_state_t *cmd)
@@ -1159,13 +1171,12 @@ static void TN_StayConnected(void)
 	double gap = Sys_DirtyTime() - tn_rc.last_frame;
 	char ip[64], line[256], label[200];
 	qbool remote = cls.state == ca_connected && cls.netcon && !sv.active && !cls.demoplayback;
-	// The frames stopped (the app was frozen). The window runs on the wall
-	// clock: a freeze usually lands inside a frame, whose host.realtime was
-	// taken before it, so a window from realtime had ended by the next frame
-	// and the silence after the freeze was judged by the 30 s limit (the
-	// away limit could come first, and its clean disconnect went to a server
-	// that had long dropped the player).
-	if (tn_rc.last_frame > 0 && gap > 5)
+	// The frames stopped for longer than a server waits (Android froze the
+	// app; a long frame does not count once net_keepalive_thread spoke for
+	// it, but nothing here can tell the two apart): the server may have
+	// dropped us, and its "Server disconnected" may have been lost from a
+	// full socket buffer. A short silence in the game after it means it did.
+	if (tn_rc.last_frame > 0 && gap > TN_FROZEN)
 		tn_rc.quick_until = Sys_DirtyTime() + 10;
 	tn_rc.last_frame = Sys_DirtyTime();
 
@@ -1193,25 +1204,40 @@ static void TN_StayConnected(void)
 		}
 		tn_rc.user = false;
 		LHNETADDRESS_ToString(&cls.netcon->peeraddress, tn_rc.addr, sizeof(tn_rc.addr), true);
-		// this device's address toward the server, every 2 s
+		// this device's address toward the server, every 2 s. A new one
+		// (Wi-Fi to mobile data) is not the end of the connection by
+		// itself: the change may be undone in a moment (a flapping Wi-Fi), or
+		// the server may still reach us. Only a server that has gone quiet
+		// since then is given up quickly.
 		if (now >= tn_rc.next_check)
 		{
 			tn_rc.next_check = now + 2;
 			TN_LocalAddress(&cls.netcon->peeraddress, ip, sizeof(ip));
 			if (ip[0] && tn_rc.localip[0] && strcmp(ip, tn_rc.localip))
-			{
 				Con_Printf("This device's address changed (%s -> %s)\n", tn_rc.localip, ip);
-				tn_rc.localip[0] = 0;
-				CL_DisconnectEx(true, "Lost connection to server (this device's address changed)");
-				return;
-			}
 			if (ip[0])
+			{
 				dp_strlcpy(tn_rc.localip, ip, sizeof(tn_rc.localip));
+				if (!tn_rc.joinip[0])
+					dp_strlcpy(tn_rc.joinip, ip, sizeof(tn_rc.joinip));
+			}
 		}
-		silence = Sys_DirtyTime() < tn_rc.quick_until ? 3 : net_reconnect_silence.value;
-		if (net_reconnect_silence.value > 0 && net_reconnect.integer && now - cls.netcon->lastMessageTime > silence)
+		// silence as of this frame's start: the packets this frame read are
+		// counted, however long the frame itself took
+		silence = now - cls.netcon->lastMessageTime;
+		if (net_reconnect.integer && tn_rc.joinip[0] && strcmp(tn_rc.localip, tn_rc.joinip) && silence > TN_MOVED_SILENCE)
 		{
-			CL_DisconnectEx(true, "Lost connection to server (nothing from it for %.0f s)", now - cls.netcon->lastMessageTime);
+			CL_DisconnectEx(true, "Lost connection to server (this device's address changed, nothing from it for %.0f s)", silence);
+			return;
+		}
+		if (net_reconnect.integer && Sys_DirtyTime() < tn_rc.quick_until && silence > TN_FROZEN_SILENCE)
+		{
+			CL_DisconnectEx(true, "Lost connection to server (nothing from it for %.0f s after the game was frozen)", silence);
+			return;
+		}
+		if (net_reconnect_silence.value > 0 && net_reconnect.integer && silence > max(60, net_reconnect_silence.value))
+		{
+			CL_DisconnectEx(true, "Lost connection to server (nothing from it for %.0f s)", silence);
 			return;
 		}
 		if (tn_rc.away)
@@ -1251,7 +1277,10 @@ static void TN_StayConnected(void)
 		}
 	}
 	else if (!remote)
+	{
 		tn_rc.localip[0] = 0;
+		tn_rc.joinip[0] = 0;
+	}
 
 	// the planned attempt
 	if (tn_rc.next && now >= tn_rc.next && cls.state != ca_connected && !cls.connect_trying)
@@ -1492,6 +1521,8 @@ void TouchNet_Init(void)
 	Cvar_RegisterVariable(&net_reconnect_state);
 	Cvar_RegisterVariable(&net_away_spectate);
 	Cvar_RegisterVariable(&net_away_limit);
+	TouchNetKeep_Init();
+	TouchNetDL_Init();
 	Cmd_AddCommand(CF_CLIENT, "net_reconnect_cancel", TouchNet_ReconnectCancel_f, "stop the automatic reconnect");
 	Cmd_AddCommand(CF_CLIENT, "touch_away", TouchNet_Away_f, "1: the game is in the background (as on Android), 0: back (for tests on desktop)");
 	TouchCurl_Init();

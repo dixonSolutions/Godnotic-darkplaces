@@ -42,6 +42,13 @@ static inline int TouchJoinPreview_ShowsPicture(int preview_on, int joining, int
 #define TJP_PIC_LIST 2     /* the picture the server list's map name finds */
 #define TJP_PIC_GENERIC 3  /* any map picture, dimmed: the map is not here yet */
 
+/* Prefer an active player; if the first snapshot is quiet, still show a player
+ * instead of leaving a populated match on the map overview. */
+static inline int TouchJoinPreview_TargetChoice(int active, int fallback)
+{
+	return active ? active : fallback;
+}
+
 static inline int TouchJoinPreview_PictureChoice(int have_map, int have_list, int have_generic)
 {
 	if (have_map)

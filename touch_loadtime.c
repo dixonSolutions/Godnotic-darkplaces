@@ -51,7 +51,7 @@ static cvar_t touch_loadtime = {CF_CLIENT | CF_SERVER, "touch_loadtime", "0", "p
 static cvar_t touch_load_restless = {CF_CLIENT, "touch_load_restless", "0", "do not wait for the frame limiter or sleep while a game is loading or the connection handshake runs (Godnotic); 0 = stock behaviour"};
 
 static cvar_t touch_load_lazysbar = {CF_CLIENT, "touch_load_lazysbar", "1", "Xonotic: cache the engine status bar's Quake pictures when the engine HUD is first drawn instead of at every renderer start (Godnotic); 0 = at renderer start"};
-static cvar_t touch_load_lazypics = {CF_CLIENT, "touch_load_lazypics", "1", "defer existing menu and local-game client precache_pic images until first use (Godnotic); 0 = load at precache"};
+static cvar_t touch_load_lazypics = {CF_CLIENT, "touch_load_lazypics", "1", "defer existing menu and client precache_pic images until first use (Godnotic); 0 = load at precache"};
 static cvar_t touch_load_lazydeflate = {CF_SERVER, "touch_load_lazydeflate", "1", "deflate csprogs.dat when a client first downloads it instead of at every map start (Godnotic)"};
 static cvar_t touch_loadtime_menu = {CF_CLIENT | CF_READONLY, "_touch_loadtime_menu", "0", "1 once the main menu has drawn its first frame (for scripts that wait for it)"};
 static cvar_t touch_loadtime_game = {CF_CLIENT | CF_READONLY, "_touch_loadtime_game", "0", "counts loads that reached their first game frame (for scripts that wait for one)"};
@@ -435,8 +435,7 @@ qbool TouchLoad_LazyPrecachePic(prvm_prog_t *prog, const char *name, unsigned in
 	char base[MAX_QPATH], path[MAX_QPATH + 16];
 	size_t i;
 
-	// Limit client-side deferral to local games; remote CSQC keeps its existing behaviour.
-	if (!touch_load_lazypics.integer || (prog != MVM_prog && !(prog == CLVM_prog && sv.active)) || cls.state == ca_dedicated || !name[0] || strlen(name) >= MAX_QPATH)
+	if (!touch_load_lazypics.integer || (prog != MVM_prog && prog != CLVM_prog) || cls.state == ca_dedicated || !name[0] || strlen(name) >= MAX_QPATH)
 		return false;
 	if (TL_FindLazyPic(name) >= 0)
 		return true;

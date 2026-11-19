@@ -20,6 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // cl_parse.c  -- parse a message received from the server
 
 #include "quakedef.h"
+#include "touch_netdl.h" // Touch: in-order download acks
 #include "touch_joinpreview.h" // Touch: baselines of a join preview
 #include "cdaudio.h"
 #include "cl_collision.h"
@@ -1530,6 +1531,7 @@ static void CL_ParseDownload(void)
 	size = (unsigned short)MSG_ReadShort(&cl_message);
 
 	// record the start/size information to ack in the next input packet
+	if (!TouchNetDL_Received(start, size)) // Touch: acked in order, so it keeps its pace at high ping (touch_netdl.c)
 	for (i = 0;i < CL_MAX_DOWNLOADACKS;i++)
 	{
 		if (!cls.dp_downloadack[i].start && !cls.dp_downloadack[i].size)
@@ -1556,6 +1558,7 @@ static void CL_ParseDownload(void)
 	// (gaps are unacceptable)
 	memcpy(cls.qw_downloadmemory + start, data, size);
 	cls.qw_downloadmemorycursize = start + size;
+	TouchNetDL_Stored(start, size); // Touch: the length is the furthest byte, not the last block's end (touch_netdl.c)
 	cls.qw_downloadpercent = (int)floor((start+size) * 100.0 / cls.qw_downloadmemorymaxsize);
 	cls.qw_downloadpercent = bound(0, cls.qw_downloadpercent, 100);
 	cls.qw_downloadspeedcount += size;

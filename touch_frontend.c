@@ -1568,7 +1568,9 @@ static int fe_covered(void)
 		return 0;
 	if (key_consoleactive & KEY_CONSOLEACTIVE_USER)
 		return 0; // the console is drawn over it, with the UI out of the way
-	return fe.cover;
+	// a match that goes on behind the menu is drawn behind it (touch_hudmode.h)
+	return TouchMode_MenuCover(fe.cover, cls.state == ca_connected && cls.signon == SIGNONS && !cls.demoplayback,
+		TouchMode_MenuPaused(sv.active, host.paused, sv.paused));
 }
 
 qbool TouchFE_SkipDraw(void)

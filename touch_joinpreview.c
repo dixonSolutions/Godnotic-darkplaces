@@ -442,7 +442,7 @@ static qbool JP_Alive(const entity_t *e, int i)
 // nothing for JP_STICKY seconds is dropped for a more active one.
 static void JP_ChooseTarget(void)
 {
-	int i, n = min(cl.num_entities, MAX_EDICTS), best = 0;
+	int i, n = min(cl.num_entities, MAX_EDICTS), best = 0, fallback = 0;
 	float bestscore = 0;
 	double now = Sys_DirtyTime();
 
@@ -453,6 +453,8 @@ static void JP_ChooseTarget(void)
 		float score = 0;
 		if (!JP_Alive(e, i))
 			continue;
+		if (!fallback)
+			fallback = i;
 		VectorSubtract(e->state_current.origin, e->state_previous.origin, delta);
 		if (VectorLength2(delta) > JP_MOVE_EPS2)
 			score += 2;
@@ -471,8 +473,8 @@ static void JP_ChooseTarget(void)
 		&& (now - jp_target_seen < JP_STICKY || !best))
 		return;  // still active enough, or nothing better to follow
 
-	jp_target = best;
-	if (best)
+	jp_target = TouchJoinPreview_TargetChoice(best, fallback);
+	if (jp_target)
 		jp_target_seen = now;
 }
 

@@ -520,11 +520,23 @@ static inline int TouchMode_MenuOverlay(int menu_open)
 	return menu_open ? 1 : 0;
 }
 
-// How dark the game is behind the menu, in percent: a light scrim, deeper when
-// the game really pauses.
+// Only dim a game that is actually paused.
 static inline int TouchMode_MenuScrim(int menu_open, int really_paused)
 {
-	return menu_open ? (really_paused ? 72 : 55) : 0;
+	return menu_open && really_paused ? 72 : 0;
+}
+
+// How much a native menu screen hides the engine (0 see-through, 1 dimmed,
+// 2 opaque: the engine skips drawing and idles, touch_frontend.c). The UI
+// says; but over a match that goes on (online, or a local game not paused)
+// the menu is always see-through, so the game keeps being drawn at its full
+// frame rate behind it -- an app that still asks for opaque (an older UI,
+// a live engine update under an old app) must not freeze the picture.
+static inline int TouchMode_MenuCover(int ui_cover, int in_match, int really_paused)
+{
+	if (in_match && !really_paused)
+		return 0;
+	return ui_cover;
 }
 
 // While the menu is open the touch controls are not on screen.
