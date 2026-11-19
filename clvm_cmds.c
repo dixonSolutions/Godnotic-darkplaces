@@ -1441,6 +1441,7 @@ void VM_drawstring(prvm_prog_t *prog)
 	int flag = 0;
 	float sx, sy;
 	VM_SAFEPARMCOUNTRANGE(5,6,VM_drawstring);
+	if (TouchHUD_HideStockKeyPanel(prog)) { PRVM_G_FLOAT(OFS_RETURN) = 1; return; } // Touch: stock spectator keyboard prompts
 
 	// polygonbegin without draw2d arg has to guess
 	prog->polygonbegin_guess2d = true;
@@ -1493,6 +1494,7 @@ void VM_drawcolorcodedstring(prvm_prog_t *prog)
 	float sx, sy, alpha;
 
 	VM_SAFEPARMCOUNTRANGE(5,6,VM_drawcolorcodedstring);
+	if (TouchHUD_HideStockKeyPanel(prog)) { VectorClear(PRVM_G_VECTOR(OFS_RETURN)); return; } // Touch: stock spectator keyboard prompts
 
 	// polygonbegin without draw2d arg has to guess
 	prog->polygonbegin_guess2d = true;
@@ -1781,6 +1783,7 @@ void VM_drawpic(prvm_prog_t *prog)
 	int flag = 0;
 
 	VM_SAFEPARMCOUNTRANGE(5,6,VM_drawpic);
+	if (TouchHUD_HideStockKeyPanel(prog)) { PRVM_G_FLOAT(OFS_RETURN) = 1; return; } // Touch: stock pressed-key pictures
 
 	// polygonbegin without draw2d arg has to guess
 	prog->polygonbegin_guess2d = true;

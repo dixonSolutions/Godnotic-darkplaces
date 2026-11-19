@@ -48,6 +48,8 @@ void UIBB_Free(uibbuf_t *b);
 
 // Display text: colour codes removed, Quake glyphs mapped, into out (NUL-terminated).
 size_t UIB_CleanText(const char *in, size_t inlen, char *out, size_t outsize);
+// Format a getstatus player block, sorting by team and score when available.
+size_t TouchSrvInfo_PlayerDetails(const char *status, char *out, size_t outsize);
 
 // ---------------------------------------------------------------- JSON values
 enum { UIBJ_NULL, UIBJ_FALSE, UIBJ_TRUE, UIBJ_NUM, UIBJ_STR, UIBJ_ARR, UIBJ_OBJ };

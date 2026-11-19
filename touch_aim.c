@@ -49,9 +49,11 @@ extern kbutton_t in_attack, in_button3;
 
 cvar_t cl_touch_autoshoot = {CF_CLIENT | CF_ARCHIVE, "cl_touch_autoshoot", "1",
 	"Touch controls: fire automatically while the crosshair is on a visible enemy player. "
-	"Desktop use also requires cl_accessibility_desktop. A manual FIRE press always works on top of it"};
+	"With a mouse present it also requires cl_accessibility_desktop. A manual FIRE press always works on top of it"};
 cvar_t cl_accessibility_desktop = {CF_CLIENT | CF_ARCHIVE, "cl_accessibility_desktop", "0",
-	"Allow the mobile auto-shoot and aim-assist settings to work with mouse and keyboard"};
+	"Keep the mobile auto-shoot and aim-assist settings on while a mouse is present (they are always on with touch or a keyboard only)"};
+cvar_t cl_touch_aim_input = {CF_CLIENT | CF_READONLY, "cl_touch_aim_input", "0",
+	"1 while the input devices present allow auto-shoot and aim assist: touch or a keyboard only, or cl_accessibility_desktop with a mouse (read-only)"};
 cvar_t cl_touch_autoshoot_delay = {CF_CLIENT | CF_ARCHIVE, "cl_touch_autoshoot_delay", "0",
 	"Auto-shoot reaction time: seconds the crosshair must stay on an enemy before firing starts (0 = on the first frame, at most 0.5)"};
 cvar_t cl_touch_autoshoot_release = {CF_CLIENT | CF_ARCHIVE, "cl_touch_autoshoot_release", "0.15",
@@ -381,6 +383,7 @@ void TouchAim_Init(void)
 	TouchAssist_Init();
 	Cvar_RegisterVariable(&cl_touch_autoshoot);
 	Cvar_RegisterVariable(&cl_accessibility_desktop);
+	Cvar_RegisterVariable(&cl_touch_aim_input);
 	Cvar_RegisterVariable(&cl_touch_autoshoot_delay);
 	Cvar_RegisterVariable(&cl_touch_autoshoot_release);
 	Cvar_RegisterVariable(&cl_touch_autoshoot_radius);
@@ -565,9 +568,18 @@ void TouchAim_SetHudAimTouch(qbool touching)
 	ta.hud_aim_touch = touching;
 }
 
+// Touch and keyboard-only play use the helpers; a mouse takes them away unless
+// the player turned them on in Accessibility.
+static qbool aim_input_enabled(void)
+{
+	return TouchAim_EnabledForInput(vid_mouse_confirmed_cvar.integer != 0, cl_accessibility_desktop.integer != 0);
+}
+
 static void publish(void)
 {
 	int active = (ta.firing ? 1 : 0) | (ta.firing2 ? 2 : 0);
+	if (cl_touch_aim_input.integer != (aim_input_enabled() ? 1 : 0))
+		Cvar_SetValueQuick(&cl_touch_aim_input, aim_input_enabled() ? 1 : 0);
 	if (cl_touch_autoshoot_active.integer != active)
 		Cvar_SetValueQuick(&cl_touch_autoshoot_active, active);
 	if (cl_touch_aim_lock.integer != ta.lock)
@@ -2989,7 +3001,7 @@ static void aim_frame(void)
 	num_marks = 0;
 
 	// what the server allows (touch_assist.c): all, on a server that says nothing
-	input_enabled = TouchAim_EnabledForInput(vid_touchscreen.integer != 0, vid_touchscreen_mouselook.integer != 0, cl_accessibility_desktop.integer != 0);
+	input_enabled = aim_input_enabled();
 	autoshoot = input_enabled && cl_touch_autoshoot.integer != 0 && TouchAssist_Allowed(TOUCH_ASSIST_AUTOSHOOT);
 	assist = input_enabled && cl_touch_aimassist.integer != 0 && TouchAssist_Allowed(TOUCH_ASSIST_AIM);
 	friction = assist ? bound(0.0f, cl_touch_aimassist_friction.value, FRICTION_MAX) : 0;
@@ -3068,6 +3080,8 @@ static void aim_frame(void)
 	// Keyboard turns and grabbed mouse motion are deliberate aim input too.
 	// In desk mode movement and manual fire can also engage the helper.
 	aim_touch = TouchAim_InputActive(aim_touch, vid_touchscreen.integer != 0, vid_touchscreen_mouselook.integer != 0, turn_mag, manual);
+	if (vid_keyboard_detected.integer && !vid_mouse_confirmed_cvar.integer)
+		aim_touch = true;
 
 	// the fire whose flight the aim leads: last decision's mode
 	hitscan_lag = 0;

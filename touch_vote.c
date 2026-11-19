@@ -8,11 +8,8 @@ answer either outside the stock screens' key binds:
     vote_active, vote_yescount, vote_nocount, vote_needed, vote_highlighted
     and vote_called_vote) and through prints every client gets, in English,
     whatever CSQC it runs (touch_vote_parse.h).
-  - the map / gametype vote at match end: the stock full-screen vote, which
-    a finger can already tap (touch_hud.c, the CSQC pointer). Its options and
-    counts are in the CSQC's mv_* globals, named differently by Xonotic 0.8.6
-    (mv_maps, mv_num_maps) and later builds (mv_entries, mv_count).
-Both get the same chip and card here. Nothing is drawn while no vote is open.
+Only called votes appear in the chip card; map and gametype votes use the
+stock selection screen. The chip is available throughout the match.
 */
 
 #include "quakedef.h"
@@ -62,8 +59,7 @@ static float smin(void) { return min(ui_w(), ui_h()); }
 typedef struct vglobal_s { int ofs; int type; } vglobal_t;
 
 static void *bound_globals;
-static vglobal_t g_active, g_yes, g_no, g_needed, g_mine, g_text, g_uid2name;
-static vglobal_t g_mv_active, g_mv_count, g_mv_entries, g_mv_data, g_mv_votes, g_mv_own, g_mv_flags, g_mv_timeout, g_mv_gtv, g_mv_winner;
+static vglobal_t g_active, g_waiting, g_yes, g_no, g_needed, g_mine, g_text, g_uid2name;
 
 static vglobal_t vglobal(prvm_prog_t *prog, const char *name)
 {
@@ -75,12 +71,6 @@ static vglobal_t vglobal(prvm_prog_t *prog, const char *name)
 		g.type = d->type & ~DEF_SAVEGLOBAL;
 	}
 	return g;
-}
-
-static vglobal_t vglobal_either(prvm_prog_t *prog, const char *name, const char *other)
-{
-	vglobal_t g = vglobal(prog, name);
-	return g.ofs >= 0 ? g : vglobal(prog, other);
 }
 
 // Element i of a global (0 for a plain one): QC arrays are consecutive globals.
@@ -106,36 +96,27 @@ static void bind_globals(void)
 {
 	prvm_prog_t *prog = CLVM_prog;
 	bound_globals = prog->loaded ? (void *)prog->globals.fp : NULL;
-	g_active.ofs = g_yes.ofs = g_no.ofs = g_needed.ofs = g_mine.ofs = g_text.ofs = g_uid2name.ofs = -1;
-	g_mv_active.ofs = g_mv_count.ofs = g_mv_entries.ofs = g_mv_data.ofs = g_mv_votes.ofs = g_mv_own.ofs = -1;
-	g_mv_flags.ofs = g_mv_timeout.ofs = g_mv_gtv.ofs = g_mv_winner.ofs = -1;
+	g_waiting.ofs = g_active.ofs = g_yes.ofs = g_no.ofs = g_needed.ofs = g_mine.ofs = g_text.ofs = g_uid2name.ofs = -1;
 	if (!prog->loaded)
 		return;
 	g_active = vglobal(prog, "vote_active");
+	g_waiting = vglobal(prog, "vote_waiting");
 	g_yes = vglobal(prog, "vote_yescount");
 	g_no = vglobal(prog, "vote_nocount");
 	g_needed = vglobal(prog, "vote_needed");
 	g_mine = vglobal(prog, "vote_highlighted");
 	g_text = vglobal(prog, "vote_called_vote");
 	g_uid2name = vglobal(prog, "uid2name_dialog");
-	g_mv_active = vglobal(prog, "mv_active");
-	g_mv_count = vglobal_either(prog, "mv_count", "mv_num_maps");
-	g_mv_entries = vglobal_either(prog, "mv_entries", "mv_maps");
-	g_mv_data = vglobal(prog, "mv_data");
-	g_mv_votes = vglobal(prog, "mv_votes");
-	g_mv_own = vglobal(prog, "mv_ownvote");
-	g_mv_flags = vglobal(prog, "mv_flags");
-	g_mv_timeout = vglobal(prog, "mv_timeout");
-	g_mv_gtv = vglobal(prog, "gametypevote");
-	g_mv_winner = vglobal(prog, "mv_winner");
-	Con_DPrintf("Touch vote: CSQC vote state %s, map vote state %s\n",
-		(g_active.ofs >= 0 && g_mine.ofs >= 0) ? "readable" : "not readable, following the server's prints",
-		(g_mv_active.ofs >= 0 && g_mv_count.ofs >= 0 && g_mv_entries.ofs >= 0 && g_mv_votes.ofs >= 0) ? "readable" : "not readable");
+	Con_DPrintf("Touch vote: CSQC vote state %s\n",
+		(g_active.ofs >= 0 && g_mine.ofs >= 0) ? "readable" : "not readable, following the server's prints");
 }
 
 // ---------------------------------------------------------------------------
 // What the server's prints said (always kept, whatever the CSQC)
 // ---------------------------------------------------------------------------
+static touchvote_list_t vote_commands, vote_maps;
+static qbool commands_received, maps_received;
+
 static struct
 {
 	qbool active;
@@ -156,14 +137,25 @@ static void apply_print(const touchvote_msg_t *m)
 	switch (m->kind)
 	{
 	case TOUCHVOTE_MSG_CALL:
+	{
+		qbool same = pr.active && !strcmp(pr.caller, m->caller) && !strcmp(pr.text, m->text);
+		if (!same)
+		{
+			char own[TOUCHVOTE_NAME_LEN] = "";
+			int slot = cl.realplayerentity - 1;
+			if (cl.scores && slot >= 0 && slot < cl.maxclients)
+				TouchVote_StripColors(cl.scores[slot].name, own, sizeof(own));
+			// Xonotic records the caller's own yes when the call is created.
+			pr.mine = own[0] && !strcmp(own, m->caller) ? TOUCHVOTE_YES : 0;
+		}
 		pr.active = true;
 		pr.start = now;
 		dp_strlcpy(pr.caller, m->caller, sizeof(pr.caller));
 		dp_strlcpy(pr.text, m->text, sizeof(pr.text));
-		pr.mine = 0;
 		pr.refused = false;
 		pr.end_kind = 0;
 		break;
+	}
 	case TOUCHVOTE_MSG_ACCEPTED:
 	case TOUCHVOTE_MSG_REJECTED:
 	case TOUCHVOTE_MSG_TIMEOUT:
@@ -194,7 +186,7 @@ static void apply_print(const touchvote_msg_t *m)
 
 void TouchVote_ServerPrint(const char *msg, size_t len)
 {
-	char line[512];
+	char line[16384];
 	size_t start = 0, i;
 	touchvote_msg_t m;
 	for (i = 0; i <= len; i++)
@@ -206,6 +198,16 @@ void TouchVote_ServerPrint(const char *msg, size_t len)
 			size_t n = min(i - start, sizeof(line) - 1);
 			memcpy(line, msg + start, n);
 			line[n] = 0;
+			if (TouchVote_ParseList(line, &vote_commands, 0))
+			{
+				commands_received = true;
+				Con_DPrintf("Touch vote: %d available commands\n", vote_commands.count);
+			}
+			else if (TouchVote_ParseList(line, &vote_maps, 1))
+			{
+				maps_received = true;
+				Con_DPrintf("Touch vote: %d available maps\n", vote_maps.count);
+			}
 			if (TouchVote_ParseLine(line, &m) != TOUCHVOTE_MSG_NONE)
 			{
 				Con_DPrintf("Touch vote: print event %d (%s / %s)\n", m.kind, m.caller, m.text);
@@ -231,51 +233,19 @@ typedef struct callview_s
 	int mine;
 } callview_t;
 
-typedef struct mapview_s
-{
-	qbool active;
-	qbool gtv;              // gametype vote
-	qbool decided;          // a winner is shown: votes no longer count
-	int n;
-	char name[MAX_ROWS][MAP_NAME_LEN];
-	int votes[MAX_ROWS];    // -1 when the server hides the counts
-	qbool available[MAX_ROWS];
-	int own;                // option voted for, -1 none
-	float timeleft;         // seconds, -1 unknown
-} mapview_t;
-
 static callview_t call;
-static mapview_t mapv;
-static qbool call_was, map_was;
+static qbool call_was;
 static unsigned int call_serial;
-static qbool call_unseen, map_unseen;
+static qbool call_unseen;
 static double pulse_time = -100;
 static int sent_choice;             // last answer sent from the card, before the server says
 static double sent_time;
 static unsigned int sent_serial;
-static int map_sent = -1;           // option sent from the card
 static int result_kind;             // how the last called vote ended (TOUCHVOTE_MSG_*, -1 unknown)
 static char shown_text[TOUCHVOTE_TEXT_LEN];   // the last called vote, kept for its result
 static char shown_caller[TOUCHVOTE_NAME_LEN];
 static int result_yes = -1, result_no = -1;
 static double result_time = -100;
-
-static const char *gametype_name(const char *id)
-{
-	static const char *names[][2] = {
-		{"dm", "Deathmatch"}, {"tdm", "Team Deathmatch"}, {"ctf", "Capture the Flag"},
-		{"ca", "Clan Arena"}, {"ft", "Freeze Tag"}, {"kh", "Key Hunt"}, {"lms", "Last Man Standing"},
-		{"dom", "Domination"}, {"ons", "Onslaught"}, {"as", "Assault"}, {"rc", "Race"},
-		{"cts", "Race CTS"}, {"ka", "Keepaway"}, {"tka", "Team Keepaway"}, {"nb", "Nexball"},
-		{"inv", "Invasion"}, {"duel", "Duel"}, {"mayhem", "Mayhem"}, {"tmayhem", "Team Mayhem"},
-		{"surv", "Survival"}, {"tst", "Team Survival"},
-	};
-	size_t i;
-	for (i = 0; i < sizeof(names) / sizeof(names[0]); i++)
-		if (!strcmp(id, names[i][0]))
-			return names[i][1];
-	return id;
-}
 
 static void read_call(callview_t *v)
 {
@@ -291,7 +261,18 @@ static void read_call(callview_t *v)
 	if (globals)
 	{
 		v->from_globals = true;
-		v->active = gfloat(g_active, 0) != 0;
+		v->active = gfloat(g_waiting.ofs >= 0 ? g_waiting : g_active, 0) != 0;
+		// Broadcasts can arrive just before the vote entity update. Give it
+		// time to catch up, but don't keep a lost end print for five minutes.
+		if (!v->active && TouchVote_CalledVisible(1, 0, pr.active, now - pr.start))
+		{
+			v->from_globals = false;
+			v->active = true;
+			dp_strlcpy(v->caller, pr.caller, sizeof(v->caller));
+			dp_strlcpy(v->text, pr.text, sizeof(v->text));
+			v->mine = pr.mine;
+			return;
+		}
 		if (!v->active)
 			return;
 		TouchVote_StripColors(gstring(g_text, 0), v->text, sizeof(v->text));
@@ -310,50 +291,12 @@ static void read_call(callview_t *v)
 	}
 	if (pr.active && now - pr.start > PRINT_VOTE_MAX_AGE)
 		pr.active = false;
-	v->active = pr.active;
+	v->active = TouchVote_CalledVisible(0, 0, pr.active, now - pr.start);
 	if (!v->active)
 		return;
 	dp_strlcpy(v->caller, pr.caller, sizeof(v->caller));
 	dp_strlcpy(v->text, pr.text, sizeof(v->text));
 	v->mine = pr.mine;
-}
-
-static void read_map(mapview_t *v)
-{
-	int i, n;
-	memset(v, 0, sizeof(*v));
-	v->own = -1;
-	v->timeleft = -1;
-	if (g_mv_active.ofs < 0 || g_mv_count.ofs < 0 || g_mv_entries.ofs < 0 || g_mv_votes.ofs < 0)
-		return;
-	if (!gfloat(g_mv_active, 0))
-		return;
-	n = (int)gfloat(g_mv_count, 0);
-	if (n <= 0)
-		return;
-	v->n = n = min(n, MAX_ROWS);
-	v->gtv = g_mv_gtv.ofs >= 0 && gfloat(g_mv_gtv, 0) != 0;
-	for (i = 0; i < n; i++)
-	{
-		const char *s = (v->gtv && g_mv_data.ofs >= 0) ? gstring(g_mv_data, i) : "";
-		if (!s[0])
-			s = gstring(g_mv_entries, i);
-		if (v->gtv)
-			s = gametype_name(s);
-		TouchVote_StripColors(s, v->name[i], sizeof(v->name[i]));
-		if (!v->name[i][0])
-			dpsnprintf(v->name[i], sizeof(v->name[i]), "#%d", i + 1);
-		v->votes[i] = (int)gfloat(g_mv_votes, i);
-		v->available[i] = g_mv_flags.ofs < 0 || ((int)gfloat(g_mv_flags, i) & 1);
-	}
-	if (g_mv_own.ofs >= 0)
-		v->own = (int)gfloat(g_mv_own, 0);
-	if (v->own >= n)
-		v->own = -1;
-	if (g_mv_timeout.ofs >= 0)
-		v->timeleft = max(0.0f, gfloat(g_mv_timeout, 0) - (float)cl.time);
-	v->decided = g_mv_winner.ofs >= 0 && gfloat(g_mv_winner, 0) > 0;
-	v->active = true;
 }
 
 // The answer the card marks: the one just sent until the server confirms
@@ -366,22 +309,13 @@ static int shown_choice(void)
 	return mine;
 }
 
-static int shown_map_pick(void)
-{
-	if (map_sent >= 0 && (mapv.own < 0 || mapv.own != map_sent))
-		return mapv.own >= 0 && host.realtime - sent_time >= 2.0 ? mapv.own : map_sent;
-	return mapv.own;
-}
-
 static qbool call_pending(void) { return call.active && !shown_choice(); }
-// The next-map vote is the game's own full screen, tapped directly (the CSQC
-// pointer): no chip or card over it unless asked for (touch_vote_mapcard 1).
-static qbool map_pending(void) { return mapv.active && !mapv.decided && shown_map_pick() < 0 && cv("touch_vote_mapcard", 0); }
 
 // ---------------------------------------------------------------------------
 // Card state
 // ---------------------------------------------------------------------------
-enum { CARD_CALL, CARD_MAP };
+enum { CARD_CALL, CARD_CREATE, CARD_ARGUMENT };
+enum { ARG_NONE, ARG_MAP, ARG_PLAYER, ARG_NUMBER, ARG_CUSTOM };
 typedef struct rect_s { float x, y, w, h; } rect_t;
 
 static struct
@@ -392,6 +326,9 @@ static struct
 	rect_t box;
 	float close_cx, close_cy, close_r;
 	float header_bottom;    // the header band's bottom: the x's touch area stops there
+	float action_cx, action_cy, action_r;
+	int scroll, arg_kind;
+	char command[TOUCHVOTE_ITEM_LEN];
 	int nrows;
 	rect_t row[MAX_ROWS];
 	int choice[MAX_ROWS];
@@ -406,16 +343,9 @@ static void card_open(void)
 	card.open = true;
 	card.close_at = 0;
 	card.drawn = false;
-	if (call.active || (host.realtime - result_time < RESULT_SHOW && !mapv.active))
-	{
-		card.kind = CARD_CALL;
-		call_unseen = false;
-	}
-	else
-	{
-		card.kind = CARD_MAP;
-		map_unseen = false;
-	}
+	card.kind = CARD_CALL;
+	card.scroll = 0;
+	call_unseen = false;
 }
 
 static void card_close(void)
@@ -443,11 +373,12 @@ static qbool touch_device(void)
 static void reset_all(void)
 {
 	memset(&pr, 0, sizeof(pr));
-	call_was = map_was = false;
-	call_unseen = map_unseen = false;
-	call.active = mapv.active = false;
+	commands_received = maps_received = false;
+	vote_commands.count = vote_maps.count = 0;
+	call_was = false;
+	call_unseen = false;
+	call.active = false;
 	sent_choice = 0;
-	map_sent = -1;
 	result_time = -100;
 	card_close();
 }
@@ -456,14 +387,23 @@ static void update_state(void)
 {
 	double now = host.realtime;
 	static double last_start;
+	static qbool queried_status;
 	if (cls.state != ca_connected || cls.signon != SIGNONS)
 	{
-		if (call_was || map_was || pr.active || card.open)
+		queried_status = false;
+		if (call_was || pr.active || card.open)
 			reset_all();
 		return;
 	}
 	if (bound_globals != (CLVM_prog->loaded ? (void *)CLVM_prog->globals.fp : NULL))
 		bind_globals();
+	// The broadcast announcing a running vote predates a late joiner. Ask
+	// even with readable globals: the stats-name dialog can mask their text.
+	if (!queried_status && CLVM_prog->loaded)
+	{
+		queried_status = true;
+		Cbuf_AddText(cmd_local, "cmd vote status\n");
+	}
 
 	read_call(&call);
 	if (call.active && (!call_was || strcmp(call.text, shown_text) || (pr.active && pr.start != last_start && !call.from_globals)))
@@ -504,16 +444,6 @@ static void update_state(void)
 	last_start = pr.start;
 	call_was = call.active;
 
-	read_map(&mapv);
-	if (mapv.active && !map_was)
-	{
-		map_unseen = true;
-		map_sent = -1;
-		pulse_time = now;
-	}
-	if (!mapv.active && map_was && card.open && card.kind == CARD_MAP)
-		card_close();
-	map_was = mapv.active;
 
 	if (card.open && card.close_at && now >= card.close_at)
 		card_close();
@@ -630,9 +560,9 @@ static void draw_chip(qbool badge, qbool pressed)
 }
 
 // Which claimed finger is on what (touch targets)
-enum { T_NONE, T_CHIP, T_CLOSE, T_CARD, T_OUTSIDE, T_ROW };
+enum { T_NONE, T_CHIP, T_CLOSE, T_ACTION, T_CARD, T_OUTSIDE, T_QYES, T_QNO, T_ROW };
 #define MAX_CLAIMED 4
-static struct { int id; int target; float x0, y0; } claimed[MAX_CLAIMED];
+static struct { int id; int target; float x0, y0, last_y; qbool moved; } claimed[MAX_CLAIMED];
 
 static qbool target_held(int target)
 {
@@ -694,6 +624,9 @@ static float card_header(float x, float y, float w, float s)
 	card.close_cx = x + w - inset - cr;
 	card.close_cy = y + inset + cr;
 	card.header_bottom = y + 2 * (inset + cr);
+	card.action_r = cr;
+	card.action_cx = card.close_cx - 2.5f * cr;
+	card.action_cy = card.close_cy;
 	return card.header_bottom;
 }
 
@@ -713,6 +646,22 @@ static void draw_close(void)
 	}
 }
 
+static int player_slot(int index)
+{
+	int i;
+	if (!cl.scores) return -1;
+	for (i = 0; i < cl.maxclients; ++i)
+		if (cl.scores[i].name[0] && index-- == 0) return i;
+	return -1;
+}
+
+static int player_count(void)
+{
+	int i, n = 0;
+	if (cl.scores) for (i = 0; i < cl.maxclients; ++i) if (cl.scores[i].name[0]) ++n;
+	return n;
+}
+
 static void draw_card(void)
 {
 	float s = smin(), w, x, y, pad = 0.035f * s, h, cy, head_h;
@@ -721,7 +670,7 @@ static void draw_card(void)
 	char buf[256], line[256];
 	const float *rgb;
 	int i, n;
-	qbool ended = card.kind == CARD_CALL && !call.active;
+	qbool ended = card.kind == CARD_CALL && !call.active && host.realtime - result_time < RESULT_SHOW;
 
 	w = min(0.86f * s, ui_w() - 2 * pad);
 	// anchored under the chip, outer edges in line (the corner it sits in)
@@ -742,7 +691,7 @@ static void draw_card(void)
 		{
 			card.choice[i] = choices[i];
 			// a refused change leaves only the answer already given
-			card.enabled[i] = !ended && !(pr.refused && mine && mine != choices[i]);
+			card.enabled[i] = call.active && !(pr.refused && mine && mine != choices[i]);
 		}
 		head_h = card_header(0, 0, w, s);
 		h = head_h + pad * 0.3f + fs_sub * 1.3f + fs_text * 1.4f + pad * 0.6f + n * (row_h + row_gap) + pad * 0.5f;
@@ -756,6 +705,12 @@ static void draw_card(void)
 		rgb = C_ACCENT_LIGHT;
 		text_at(x + pad, card.close_cy - fs_title * 0.5f, fs_title, ended ? result_label(&rgb) : "VOTE", rgb, a);
 		cy = card.header_bottom + pad * 0.3f;
+		if (!call.active && host.realtime - result_time >= RESULT_SHOW)
+		{
+			text_at(x + pad, cy, fs_sub, "No active vote", C_INK, a * 0.7f);
+			card.nrows = 0;
+			goto card_done;
+		}
 		if (shown_caller[0])
 			dpsnprintf(buf, sizeof(buf), "%s calls a vote for", shown_caller);
 		else
@@ -777,96 +732,145 @@ static void draw_card(void)
 	}
 	else
 	{
-		// map / gametype vote: options ranked by votes, the player's pick marked
-		int order[MAX_ROWS], j, pick = shown_map_pick();
-		qbool counts = false;
-		n = mapv.n;
-		for (i = 0; i < n; i++)
-		{
-			order[i] = i;
-			if (mapv.votes[i] >= 0)
-				counts = true;
-		}
-		for (i = 1; i < n; i++)
-			for (j = i; j > 0 && mapv.votes[order[j]] > mapv.votes[order[j - 1]]; j--)
-			{
-				int t = order[j];
-				order[j] = order[j - 1];
-				order[j - 1] = t;
-			}
+		int total = 0, first, visible = 5;
+		static const int values[] = {0, 5, 10, 15, 20, 30, 40, 50, 75, 100, 150, 200};
+		const char *title = card.kind == CARD_CREATE ? "CREATE VOTE" : "CHOOSE OPTION";
+		row_h = 0.105f * s;
 		row_gap = 0.012f * s;
-		row_h = 0.095f * s;
+		if (card.kind == CARD_CREATE) total = vote_commands.count;
+		else if (card.arg_kind == ARG_MAP) total = vote_maps.count;
+		else if (card.arg_kind == ARG_PLAYER) total = player_count();
+		else if (card.arg_kind == ARG_NUMBER) total = (int)(sizeof(values) / sizeof(values[0])) + 1;
+		else total = 2;
+		card.scroll = bound(0, card.scroll, max(0, total - visible));
+		first = card.scroll;
+		n = min(visible, max(0, total - first));
 		head_h = card_header(0, 0, w, s);
-		h = head_h + pad * 0.4f + n * (row_h + row_gap) + pad * 0.5f;
-		if (h > ui_h() - 2 * pad)
-		{
-			// shrink the rows to fit the screen
-			float fixed = head_h + pad * 0.4f + pad * 0.5f;
-			row_h = max(0.05f * s, (ui_h() - 2 * pad - fixed) / n - row_gap);
-			h = fixed + n * (row_h + row_gap);
-		}
+		h = head_h + pad * 0.6f + max(1, n) * (row_h + row_gap) + pad * 0.5f;
 		y = bound(pad, y, ui_h() - pad - h);
 		card_header(x, y, w, s);
 		card.box.x = x; card.box.y = y; card.box.w = w; card.box.h = h;
 		box(x, y + stroke * 2, w, h, pad * 0.6f, C_SHADOW, 0.45f);
 		box(x, y, w, h, pad * 0.6f, C_SURFACE, 0.90f);
 		box_rim(x, y, w, h, pad * 0.6f, stroke, C_INK, 0.35f);
-		cy = card.close_cy - fs_title * 0.5f;
-		text_at(x + pad, cy, fs_title, mapv.gtv ? "GAMETYPE VOTE" : "MAP VOTE", C_ACCENT_LIGHT, a);
-		if (mapv.timeleft >= 0 && !mapv.decided)
-		{
-			dpsnprintf(buf, sizeof(buf), "%d s", (int)ceil(mapv.timeleft));
-			text_at(card.close_cx - card.close_r - pad * 0.6f - text_width(buf, fs_title), cy, fs_title, buf, C_INK, a * 0.7f);
-		}
+		text_at(x + pad, card.close_cy - fs_title * 0.5f, fs_title, title, C_ACCENT_LIGHT, a);
 		cy = card.header_bottom + pad * 0.4f;
-		for (i = 0; i < n && i < MAX_ROWS; i++)
+		if (!n)
 		{
-			int k = order[i];
+			const char *msg = card.kind == CARD_CREATE ? (commands_received ? "No votes available" : "Loading votes...") : (maps_received ? "No maps available" : "Loading maps...");
+			text_at(x + pad, cy, fs_sub, msg, C_INK, a * 0.7f);
+		}
+		for (i = 0; i < n; ++i)
+		{
+			int k = first + i;
+			const char *label = "";
 			rect_t *b = &card.row[i];
+			if (card.kind == CARD_CREATE) label = vote_commands.item[k];
+			else if (card.arg_kind == ARG_MAP) label = vote_maps.item[k];
+			else if (card.arg_kind == ARG_PLAYER)
+			{
+				int slot = player_slot(k);
+				if (slot >= 0) TouchVote_StripColors(cl.scores[slot].name, buf, sizeof(buf));
+				else dp_strlcpy(buf, "Player left", sizeof(buf));
+				label = buf;
+			}
+			else if (card.arg_kind == ARG_NUMBER) { if (k < (int)(sizeof(values) / sizeof(values[0]))) dpsnprintf(buf, sizeof(buf), "%d", values[k]); else dp_strlcpy(buf, "Other...", sizeof(buf)); label = buf; }
+			else label = k == 0 ? "Call without arguments" : "Enter arguments...";
 			b->x = x + pad; b->y = cy; b->w = w - 2 * pad; b->h = row_h;
 			card.choice[i] = k;
-			card.enabled[i] = mapv.available[k] && !mapv.decided;
+			card.enabled[i] = !(card.kind == CARD_ARGUMENT && card.arg_kind == ARG_PLAYER && player_slot(k) < 0);
 			card.nrows = i + 1;
-			draw_row(i, mapv.name[k], counts ? max(0, mapv.votes[k]) : -1, pick == k, a);
+			draw_row(i, label, -1, false, a);
 			cy += row_h + row_gap;
+		}
+		if (total > visible)
+		{
+			float track = n * (row_h + row_gap), bar = track * visible / total;
+			box(x + w - pad * 0.35f, card.header_bottom + pad * 0.4f + (track - bar) * first / (total - visible), stroke * 2, bar, stroke, C_INK, 0.5f);
 		}
 	}
 
+card_done:
+	// The header action is + on the vote card, and back on picker pages.
+	DrawQ_RoundedBox(card.action_cx, card.action_cy, card.action_r, card.action_r, card.action_r, 0, C_INK[0], C_INK[1], C_INK[2], 0.12f, 0);
+	text_at(card.action_cx - fs_title * 0.28f, card.action_cy - fs_title * 0.52f, fs_title, card.kind == CARD_CALL ? "+" : "<", C_INK, 1);
 	draw_close();
-	if (!card.drawn && card.nrows > 0)
-		Con_DPrintf("Touch vote: card %.0f %.0f %.0fx%.0f of %.0fx%.0f, header to %.0f, x at %.0f %.0f r %.0f, first row %.0f..%.0f x %.0f..%.0f\n",
-			x, y, w, card.box.h, ui_w(), ui_h(), card.header_bottom, card.close_cx, card.close_cy, card.close_r,
-			card.row[0].y, card.row[0].y + card.row[0].h, card.row[0].x, card.row[0].x + card.row[0].w);
+	if (!card.drawn)
+		Con_DPrintf("Touch vote: card %.0f %.0f %.0fx%.0f action %.0f %.0f r %.0f rows %d\n",
+			x, y, w, card.box.h, card.action_cx, card.action_cy, card.action_r, card.nrows);
 	card.drawn = true;
+}
+
+// ---------------------------------------------------------------------------
+// Yes / No while a called vote waits for an answer: two big buttons under the
+// stock vote panel, in every mode (also over the match-end screens, where the
+// chip is not shown), so a vote is answered with one tap and no key names.
+// ---------------------------------------------------------------------------
+static struct { rect_t b[2]; qbool drawn; } quick;
+
+static void quick_place(void)
+{
+	float s = smin();
+	float dpu = TouchDp_Density(cv("vid_touchscreen_ydpi", 0), (float)min(vid.mode.width, vid.mode.height)) * (vid.mode.height > 0 ? ui_h() / (float)vid.mode.height : 1.0f);
+	float h = max(0.105f * s, TOUCHDP_MIN_TARGET * 1.3f * dpu), w = max(0.24f * s, h * 2.2f), gap = 0.035f * s;
+	float x = (ui_w() - 2 * w - gap) * 0.5f, y = ui_h() * 0.235f;
+	y = min(y, ui_h() - h - 0.02f * s);
+	quick.b[0].x = x;           quick.b[0].y = y; quick.b[0].w = w; quick.b[0].h = h;
+	quick.b[1].x = x + w + gap; quick.b[1].y = y; quick.b[1].w = w; quick.b[1].h = h;
+}
+
+static void draw_quick(void)
+{
+	int i;
+	quick_place();
+	for (i = 0; i < 2; i++)
+	{
+		rect_t *b = &quick.b[i];
+		const float *col = i == 0 ? C_SUCCESS : C_DANGER;
+		float fs = b->h * 0.48f, stroke = max(1.5f, smin() / 300.0f);
+		qbool held = target_held(T_QYES + i);
+		char buf[32];
+		int count = i == 0 ? call.yes : call.no;
+		float tw;
+		box(b->x, b->y + stroke * 2, b->w, b->h, b->h * 0.3f, C_SHADOW, 0.45f);
+		box(b->x, b->y, b->w, b->h, b->h * 0.3f, C_SURFACE, 0.92f);
+		box(b->x, b->y, b->w, b->h, b->h * 0.3f, col, held ? 0.95f : 0.62f);
+		box_rim(b->x, b->y, b->w, b->h, b->h * 0.3f, stroke, C_INK, 0.85f);
+		if (count >= 0)
+			dpsnprintf(buf, sizeof(buf), "%s  %d", i == 0 ? "YES" : "NO", count);
+		else
+			dp_strlcpy(buf, i == 0 ? "YES" : "NO", sizeof(buf));
+		tw = text_width(buf, fs);
+		text_at(b->x + (b->w - tw) * 0.5f, b->y + (b->h - fs) * 0.5f, fs, buf, C_INK, 1.0f);
+	}
+	quick.drawn = true;
 }
 
 void TouchVote_Draw(void)
 {
-	qbool show;
 	update_state();
 	chip.drawn = false;
+	quick.drawn = false;
+	// Over every mode, even where the chip is not shown (the match-end screens)
+	if (in_play() && touch_device() && call_pending() && !card.open)
+		draw_quick();
 	// The end-of-match scoreboard and the next-map vote own the screen: MENU
 	// and the console button only (touch_hudmode.h TouchMode_Controls).
 	if (!in_play() || !touch_device() || !(TouchMode_Controls(TouchHudMode_Current()->mode, 0) & TOUCHCTL_VOTECHIP))
 	{
-		card.drawn = false;
-		return;
-	}
-	show = call_pending() || map_pending() || card.open;
-	if (!show)
-	{
+		// The match-end map and gametype votes have their own screen: the
+		// card must not stay open under it nor come back after it.
+		if (card.open)
+			card_close();
 		card.drawn = false;
 		return;
 	}
 	chip_place(&chip.cx, &chip.cy, &chip.r);
-	draw_chip((call_unseen && call_pending()) || (map_unseen && map_pending()), card.open || target_held(T_CHIP));
+	draw_chip(call_unseen && call_pending(), card.open || target_held(T_CHIP));
 	chip.drawn = true;
 	if (card.open)
 	{
-		if (card.kind == CARD_MAP && !mapv.active)
-			card_close();
-		else
-			draw_card();
+		draw_card();
 	}
 	if (!card.open)
 		card.drawn = false;
@@ -879,12 +883,18 @@ static int target_at(float px, float py)
 {
 	int i;
 	float dx = px - chip.cx, dy = py - chip.cy, cr;
+	if (quick.drawn)
+		for (i = 0; i < 2; i++)
+			if (in_rect(&quick.b[i], px, py, quick.b[i].h * 0.08f))
+				return T_QYES + i;
 	if (card.open && card.drawn)
 	{
 		float cdx = px - card.close_cx, cdy = py - card.close_cy;
 		for (i = 0; i < card.nrows; i++)
 			if (in_rect(&card.row[i], px, py, card.row[i].h * 0.05f))
 				return card.enabled[i] ? T_ROW + i : T_CARD;
+		if ((px - card.action_cx) * (px - card.action_cx) + (py - card.action_cy) * (py - card.action_cy) <= card.action_r * card.action_r * 1.5f && py < card.header_bottom)
+			return T_ACTION;
 		// the x: a little larger than drawn, but never below the header band
 		cr = card.close_r * 1.5f;
 		if (cdx * cdx + cdy * cdy <= cr * cr && py < card.header_bottom && px <= card.box.x + card.box.w)
@@ -910,14 +920,75 @@ static void vote_row(int i)
 		pr.refused = false;
 	}
 	else
-	{
-		// the stock vote screen sends its choice as an impulse (MapVote_WritePlayerVote)
-		dpsnprintf(cmd, sizeof(cmd), "impulse %d\n", card.choice[i] + 1);
-		map_sent = card.choice[i];
-	}
+		return;
 	sent_time = host.realtime;
 	Con_DPrintf("Touch vote: %s", cmd);
 	Cbuf_AddText(cmd_local, cmd);
+}
+
+static void create_vote_row(int row)
+{
+	static const int values[] = {0, 5, 10, 15, 20, 30, 40, 50, 75, 100, 150, 200};
+	int k = card.choice[row];
+	char command[256], arg[80] = "";
+	if (card.kind == CARD_CREATE)
+	{
+		if (k < 0 || k >= vote_commands.count) return;
+		dp_strlcpy(card.command, vote_commands.item[k], sizeof(card.command));
+		card.scroll = 0;
+		card.kind = CARD_ARGUMENT;
+		Con_DPrintf("Touch vote: selected command %s\n", card.command);
+		if (!strcmp(card.command, "gotomap") || !strcmp(card.command, "map") || !strcmp(card.command, "chmap") || !strcmp(card.command, "nextmap"))
+		{
+			card.arg_kind = ARG_MAP;
+			maps_received = false;
+			vote_maps.count = 0;
+			Cbuf_AddText(cmd_local, "cmd lsmaps\n");
+		}
+		else if (!strcmp(card.command, "kick") || !strcmp(card.command, "kickban") || !strncmp(card.command, "moveto", 6)) card.arg_kind = ARG_PLAYER;
+		else if (!strcmp(card.command, "fraglimit") || !strcmp(card.command, "timelimit")) card.arg_kind = ARG_NUMBER;
+		else card.arg_kind = ARG_CUSTOM;
+		return;
+	}
+	if (card.arg_kind == ARG_MAP)
+	{
+		if (k < 0 || k >= vote_maps.count) return;
+		dp_strlcpy(arg, vote_maps.item[k], sizeof(arg));
+	}
+	else if (card.arg_kind == ARG_PLAYER)
+	{
+		int slot = player_slot(k);
+		if (slot < 0) return;
+		dpsnprintf(arg, sizeof(arg), "#%d", slot + 1);
+	}
+	else if (card.arg_kind == ARG_NUMBER)
+	{
+		if (k < 0 || k > (int)(sizeof(values) / sizeof(values[0]))) return;
+		if (k == (int)(sizeof(values) / sizeof(values[0])))
+		{
+			dpsnprintf(key_line, sizeof(key_line), "]cmd vote call %s ", card.command);
+			key_linepos = (int)strlen(key_line);
+			Cbuf_AddText(cmd_local, "toggleconsole\n");
+			card_close();
+			return;
+		}
+		dpsnprintf(arg, sizeof(arg), "%d", values[k]);
+	}
+	else if (k == 1)
+	{
+		// Custom server commands may require arguments not described by vhelp.
+		// Open the engine's editable command line with the safe command prefilled.
+		dpsnprintf(key_line, sizeof(key_line), "]cmd vote call %s ", card.command);
+		key_linepos = (int)strlen(key_line);
+		Cbuf_AddText(cmd_local, "toggleconsole\n");
+		card_close();
+		return;
+	}
+	dpsnprintf(command, sizeof(command), "cmd vote call %s%s%s\n", card.command, arg[0] ? " " : "", arg);
+	Con_DPrintf("Touch vote: %s", command);
+	Cbuf_AddText(cmd_local, command);
+	card.kind = CARD_CALL;
+	card.scroll = 0;
 }
 
 qbool TouchVote_Finger(int type, int id, float nx, float ny)
@@ -936,7 +1007,7 @@ qbool TouchVote_Finger(int type, int id, float nx, float ny)
 		int t;
 		if (slot >= 0)
 			claimed[slot].id = 0; // a stale entry for a reused id
-		if (!in_play() || !(chip.drawn || card.drawn))
+		if (!in_play() || !(chip.drawn || card.drawn || quick.drawn))
 			return false;
 		t = target_at(px, py);
 		if (t == T_NONE)
@@ -947,7 +1018,8 @@ qbool TouchVote_Finger(int type, int id, float nx, float ny)
 				claimed[i].id = id;
 				claimed[i].target = t;
 				claimed[i].x0 = px;
-				claimed[i].y0 = py;
+				claimed[i].y0 = claimed[i].last_y = py;
+				claimed[i].moved = false;
 				return true;
 			}
 		return false;
@@ -955,11 +1027,26 @@ qbool TouchVote_Finger(int type, int id, float nx, float ny)
 	if (slot < 0)
 		return false;
 	if (type == 1)
+	{
+		if (card.open && card.kind != CARD_CALL && (claimed[slot].target == T_CARD || claimed[slot].target >= T_ROW))
+		{
+			float step = 0.117f * smin(), delta = py - claimed[slot].last_y;
+			if (fabs(py - claimed[slot].y0) > 0.02f * smin()) claimed[slot].moved = true;
+			if (fabs(delta) >= step)
+			{
+				int rows = (int)(delta / step);
+				card.scroll = max(0, card.scroll - rows);
+				claimed[slot].last_y += rows * step;
+			}
+		}
 		return true;
+	}
 	// up: act if it is still on what it went down on
 	{
 		int t = claimed[slot].target, now_t = target_at(px, py);
+		qbool moved = claimed[slot].moved;
 		claimed[slot].id = 0;
+		if (moved) return true;
 		if (t == T_OUTSIDE)
 			card_close();
 		else if (now_t == t)
@@ -973,8 +1060,36 @@ qbool TouchVote_Finger(int type, int id, float nx, float ny)
 			}
 			else if (t == T_CLOSE)
 				card_close();
+			else if (t == T_ACTION)
+			{
+				card.scroll = 0;
+				card.close_at = 0;
+				if (card.kind == CARD_CALL)
+				{
+					card.kind = CARD_CREATE;
+					Con_DPrintf("Touch vote: create picker opened\n");
+					commands_received = false;
+					vote_commands.count = 0;
+					Cbuf_AddText(cmd_local, "cmd vote help\n");
+				}
+				else if (card.kind == CARD_CREATE) card.kind = CARD_CALL;
+				else card.kind = CARD_CREATE;
+			}
+			else if (t == T_QYES || t == T_QNO)
+			{
+				// the same answer as the card's rows
+				sent_choice = t == T_QYES ? TOUCHVOTE_YES : TOUCHVOTE_NO;
+				sent_serial = call_serial;
+				sent_time = host.realtime;
+				pr.refused = false;
+				Cbuf_AddText(cmd_local, t == T_QYES ? "cmd vote yes\n" : "cmd vote no\n");
+				Con_DPrintf("Touch vote: quick %s\n", t == T_QYES ? "yes" : "no");
+			}
 			else if (t >= T_ROW && t - T_ROW < card.nrows)
-				vote_row(t - T_ROW);
+			{
+				if (card.kind == CARD_CALL) vote_row(t - T_ROW);
+				else create_vote_row(t - T_ROW);
+			}
 		}
 	}
 	return true;
@@ -984,11 +1099,23 @@ qbool TouchVote_Back(void)
 {
 	if (!card.open)
 		return false;
-	card_close();
+	if (card.kind == CARD_ARGUMENT) { card.kind = CARD_CREATE; card.scroll = 0; }
+	else if (card.kind == CARD_CREATE) { card.kind = CARD_CALL; card.scroll = 0; }
+	else card_close();
 	return true;
+}
+
+static void TouchVote_State_f(cmd_state_t *cmd)
+{
+	(void)cmd;
+	Con_Printf("TOUCHVOTE mode=%s chip=%d x=%.2f y=%.2f r=%.2f open=%d card=%d kind=%d action=%.2f,%.2f rows=%d scroll=%d call=%d src=%s caller=%s mine=%d quick=%d qyes=%.0f,%.0f yes=%d no=%d commands=%d maps=%d size=%.0f,%.0f\n",
+		TouchMode_Name(TouchHudMode_Current()->mode), chip.drawn, chip.cx, chip.cy, chip.r, card.open, card.open && card.drawn, card.kind,
+		card.action_cx, card.action_cy, card.nrows, card.scroll, call.active, call.from_globals ? "csqc" : "prints", call.caller[0] ? call.caller : "-",
+		shown_choice(), quick.drawn, quick.b[0].x + quick.b[0].w * 0.5f, quick.b[0].y + quick.b[0].h * 0.5f, call.yes, call.no, vote_commands.count, vote_maps.count, ui_w(), ui_h());
 }
 
 void TouchVote_Init(void)
 {
 	Cvar_RegisterVariable(&cl_touch_vote_noglobals);
+	Cmd_AddCommand(CF_CLIENT, "touch_vote_state", TouchVote_State_f, "show touch vote panel state for diagnostics");
 }

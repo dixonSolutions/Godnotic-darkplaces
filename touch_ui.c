@@ -11,6 +11,7 @@
 #define TOUCHUI_SYSTEM_KEYS_ONLY 0
 #endif
 #include "touch_spectate.h"
+#include "csprogs.h"
 #include "touch_ui.h"
 #include "touch_shellbtn.h"
 #include "draw.h"
@@ -306,6 +307,23 @@ static const touchui_specentry_t touchui_spec_entries[] = {
 static int touchui_spec_shown[TOUCHUI_SPEC_COUNT];
 static int touchui_spec_shown_count;
 
+/* The loaded CSQC's own spectatee_status (the server's clientdata: 0 playing,
+ * -1 observing, else the followed player). The scoreboard can lag a change
+ * between dead, observing and playing; this does not. TOUCHUI_NO_SPECTATEE when
+ * no CSQC or no such global. */
+int TouchUI_SpectateeStatus(void)
+{
+	prvm_prog_t *prog = CLVM_prog;
+	mdef_t *g = prog && prog->loaded ? PRVM_ED_FindGlobal(prog, "spectatee_status") : NULL;
+	int type;
+	if (!g || g->ofs < 0 || g->ofs >= prog->numglobals)
+		return TOUCHUI_NO_SPECTATEE;
+	type = g->type & ~DEF_SAVEGLOBAL;
+	if (type == ev_float)
+		return (int)PRVM_GLOBALFIELDFLOAT(g->ofs);
+	return PRVM_GLOBALFIELDVALUE(g->ofs)->_int;
+}
+
 static touchui_specmode_t TouchUI_SpectatorMode(void)
 {
 	int me = cl.realplayerentity;
@@ -322,7 +340,13 @@ static touchui_specmode_t TouchUI_SpectatorMode(void)
 	 * playing, is TouchSpec_StateFrom (touch_spectate.h): its numbers are this
 	 * enum's. */
 	frags = cl.scores[slot].frags;
-	return (touchui_specmode_t)TouchSpec_StateFrom(frags, me, cl.viewentity, cl.maxclients, cl.stats[STAT_HEALTH]);
+	{
+		int state = TouchSpec_StateFrom(frags, me, cl.viewentity, cl.maxclients, cl.stats[STAT_HEALTH]);
+		int status = TouchUI_SpectateeStatus();
+		if (status != TOUCHUI_NO_SPECTATEE)
+			state = TouchSpec_StateFromCsqc(status, state);
+		return (touchui_specmode_t)state;
+	}
 }
 
 /* Observing or watching: jump means "join" there, not a hop (touch_hud.c). */

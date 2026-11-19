@@ -1021,9 +1021,24 @@ void TouchSrvList_Shutdown(void)
 }
 
 // the file system is up by the first frame
+void TouchSrvList_EnsureCache(void)
+{
+	static qbool attempted;
+	if (attempted) return;
+	attempted = true;
+	// Populate the shared browser source before any menu or native renderer asks
+	// for it.  This is deliberately independent of DNS and network replies.
+	if (TouchSrvList_Fast() && net_slist_saved.integer)
+	{
+		preload();
+		sl.preloaded_once = true;
+	}
+}
+
 void TouchSrvList_FirstFrame(void)
 {
 	summary_from_saved();
+	TouchSrvList_EnsureCache();
 }
 
 #else // !CONFIG_MENU: the dedicated server has no server list
@@ -1036,5 +1051,6 @@ void TouchSrvList_Init(void) {}
 void TouchSrvList_Shutdown(void) {}
 void TouchSrvList_Frame(void) {}
 void TouchSrvList_FirstFrame(void) {}
+void TouchSrvList_EnsureCache(void) {}
 
 #endif

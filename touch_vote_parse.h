@@ -107,6 +107,64 @@ static int touchvote_ends_with(const char *s, const char *tail)
 	return a >= b && !strcmp(s + a - b, tail);
 }
 
+// Server-provided choices are data, never console syntax.  Reject punctuation
+// that could change the command sent when a row is selected.
+#define TOUCHVOTE_LIST_MAX 512
+#define TOUCHVOTE_ITEM_LEN 64
+typedef struct touchvote_list_s
+{
+	int count;
+	char item[TOUCHVOTE_LIST_MAX][TOUCHVOTE_ITEM_LEN];
+} touchvote_list_t;
+
+static int TouchVote_SafeToken(const char *s)
+{
+	const unsigned char *p = (const unsigned char *)s;
+	if (!*p) return 0;
+	for (; *p; ++p)
+		if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
+		      (*p >= '0' && *p <= '9') || *p == '_' || *p == '-' || *p == '.'))
+			return 0;
+	return 1;
+}
+
+// Recognize the unmodified Xonotic help and lsmaps replies, after colour
+// stripping. The asterisk on new maps is a display marker, not part of its ID.
+static int TouchVote_ParseList(const char *raw, touchvote_list_t *out, int maps)
+{
+	char line[16384], *p, *end;
+	const char *prefix = maps ? "Maps available (" : "You can call a vote for or execute these commands: ";
+	TouchVote_StripColors(raw, line, sizeof(line));
+	if (strncmp(line, prefix, strlen(prefix))) return 0;
+	p = maps ? strstr(line, ": ") : line + strlen(prefix);
+	if (!p) return 0;
+	if (maps) p += 2;
+	else if ((end = strstr(p, " and maybe further arguments"))) *end = 0;
+	out->count = 0;
+	while (*p && out->count < TOUCHVOTE_LIST_MAX)
+	{
+		char *start;
+		while (*p == ' ') ++p;
+		if (!*p || *p == '(') break;
+		start = p;
+		while (*p && *p != ' ') ++p;
+		if (*p) *p++ = 0;
+		if (maps && *start == '*') ++start;
+		if (strlen(start) < TOUCHVOTE_ITEM_LEN && TouchVote_SafeToken(start))
+			touchvote_copy(out->item[out->count++], TOUCHVOTE_ITEM_LEN, start, strlen(start));
+	}
+	return 1;
+}
+
+// A called vote remains visible regardless of the player's own choice. Match-end
+// map and gametype voting have no input here and cannot create a called vote.
+static int TouchVote_CalledVisible(int globals_available, int called, int printed, double print_age)
+{
+	if (globals_available)
+		return called || (printed && print_age >= 0 && print_age < 5.0);
+	return printed && print_age >= 0 && print_age <= 300.0;
+}
+
 // One line of a server print (no newline). Returns the kind and fills m.
 static int TouchVote_ParseLine(const char *raw, touchvote_msg_t *m)
 {
@@ -129,6 +187,17 @@ static int TouchVote_ParseLine(const char *raw, touchvote_msg_t *m)
 		return m->kind = TOUCHVOTE_MSG_ALREADY;
 	if (!strcmp(line, "No vote called."))
 		return m->kind = TOUCHVOTE_MSG_NOVOTE;
+
+	// A status reply also recovers a vote that started before we joined.
+	if (!strncmp(line, "Vote for ", 9) && (q = strstr(line + 9, " called by ")))
+	{
+		const char *caller = q + strlen(" called by ");
+		size_t n = strlen(caller);
+		if (n && caller[n - 1] == '.') n--;
+		touchvote_copy(m->text, sizeof(m->text), line + 9, q - (line + 9));
+		touchvote_copy(m->caller, sizeof(m->caller), caller, n);
+		return m->kind = TOUCHVOTE_MSG_CALL;
+	}
 
 	// bprint lines all start "* "
 	if (line[0] != '*' || line[1] != ' ')

@@ -28,6 +28,8 @@ nade or turn.
 #ifndef TOUCH_SPECTATE_H
 #define TOUCH_SPECTATE_H
 
+#include <string.h>
+
 // Spectator states (TouchUI_SpectatorState).
 #define TOUCHSPEC_NONE      0
 #define TOUCHSPEC_OBSERVING 1
@@ -66,6 +68,24 @@ static inline int TouchSpec_StateFrom(int frags, int me, int viewentity, int max
 	if (health > 0)
 		return TOUCHSPEC_NONE;
 	return out ? TOUCHSPEC_OUT_FREE : TOUCHSPEC_OBSERVING;
+}
+
+// CSQC receives the server's spectator status directly. The scoreboard can
+// lag a death-to-spectator transition and retain the dead player's frags.
+static inline int TouchSpec_StateFromCsqc(int status, int fallback)
+{
+	int out = fallback == TOUCHSPEC_OUT || fallback == TOUCHSPEC_OUT_FREE;
+	if (!status)
+		return TOUCHSPEC_NONE;
+	if (status < 0)
+		return out ? TOUCHSPEC_OUT_FREE : TOUCHSPEC_OBSERVING;
+	return out ? TOUCHSPEC_OUT : TOUCHSPEC_FOLLOWING;
+}
+
+static inline int TouchSpec_HideStockPanel(const char *name, int foreign, int touch, int keyboard, int spectating)
+{
+	return foreign && touch && !keyboard && spectating &&
+		(!strcmp(name, "HUD_InfoMessages") || !strcmp(name, "HUD_PressedKeys"));
 }
 
 // The spectator bar's parts, left to right.

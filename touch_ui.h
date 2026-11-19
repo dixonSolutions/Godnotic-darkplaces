@@ -110,6 +110,8 @@ qbool TouchUI_IsSpectating(void);
 qbool TouchUI_IsWatching(void);
 /* TOUCHSPEC_* of touch_spectate.h: playing, observing, following, out of the round. */
 int TouchUI_SpectatorState(void);
+#define TOUCHUI_NO_SPECTATEE (-32768)
+int TouchUI_SpectateeStatus(void); // the CSQC's spectatee_status, or TOUCHUI_NO_SPECTATEE
 
 /*
  * Fill out[] with items for a sheet drawn inside (x,y,w,h).

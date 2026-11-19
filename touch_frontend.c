@@ -52,6 +52,7 @@ Everything works on the desktop too, without a sink, for headless tests
 #include "touch_lua.h"
 #include "touch_net.h"
 #include "touch_joinname.h"
+#include "touch_uib_int.h" // Touch: shared server player details formatter
 
 extern uint8_t serverlist_querystage; // netconn.c
 
@@ -645,6 +646,11 @@ static void publish_servers(qbool force)
 		jb_kint(&b, "x", in->maxplayers);
 		jb_kint(&b, "pr", in->protocol);
 		jb_kstr(&b, "q", in->qcstatus);
+		// The getstatus player block is empty when the server only sent getinfo.
+		jb_kstr(&b, "player_status", in->players);
+		char player_details[2800];
+		TouchSrvInfo_PlayerDetails(in->players, player_details, sizeof(player_details));
+		jb_kstr(&b, "player_details", player_details);
 		jb_kbool(&b, "l", strstr(va(clean, sizeof(clean), "%s:", in->qcstatus), ":L1:") != NULL);
 		jb_kbool(&b, "f", in->isfavorite);
 		jb_kbool(&b, "lan", private_address(in->cname));

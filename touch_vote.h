@@ -1,12 +1,9 @@
 /*
 Godnotic: answering votes with a finger.
 
-A small round "i" chip sits in the top bar, between MENU and CHAT, while a vote
-this player can answer is open: one called in the match (vcall), or the map /
-gametype vote at match end. A dot on it marks one not looked at yet. Tapping it
-opens a card over the match with what is being voted on and a large row per
-choice, with the counts the server reveals and this player's own choice
-marked; tapping a row votes. The chip and the card go when the vote ends.
+A small round "i" chip sits in the touch HUD throughout a match. Tapping it
+opens the called-vote card, including after this player has voted. The game's
+own map and gametype votes use their on-screen selection instead.
 
 It is drawn by the engine over whatever CSQC is loaded, so it is the same in a
 local match (the port's CSQC) and on any server (the server's CSQC), with the

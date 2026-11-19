@@ -507,22 +507,15 @@ static const vid_presence_t *vid_presence_get(void)
 	return &vid_presence;
 }
 
-// A listed mouse or touchpad has been used since it was last plugged in.
-// Presence alone is not proof: Android tablets list a built-in pad nobody
-// aims with, and a keyboard beside that phantom pad used to hide the touch
-// controls. A keyboard alone keeps them; a real mouse takes them away once it
-// moves. Reset when the pointer comes or goes (vid_presence_changed).
+// Remember actual use for pointer feedback and folded-away device detection.
 static qbool vid_mouse_confirmed;
 
 void VID_DetectTouchHardware(qbool *has_touchscreen, qbool *is_touch_only)
 {
 	const vid_presence_t *p = vid_presence_get();
 	*has_touchscreen = p->touch;
-	// A keyboard alone leaves the touch controls on: there is still nothing
-	// else to aim with. A listed mouse counts only once it has been used, so a
-	// phantom device cannot hide the only controls that can fire, while a real
-	// mouse hides them on its first motion.
-	*is_touch_only = p->touch && !(p->keyboard && p->mouse && vid_mouse_confirmed);
+	// Either device alone leaves the remaining touch controls available.
+	*is_touch_only = p->touch && !(p->keyboard && p->mouse);
 }
 
 // ---------------------------------------------------------------------------
@@ -701,21 +694,11 @@ void VID_NoteMouseUse(float travel, qbool press)
 	Con_Printf("Input: mouse in use\n");
 }
 
-// A mouse or touchpad aims in the game once it has been
-// moved or clicked, and until the fingers have been the only pointer for
-// VID_MOUSE_HOLD seconds. Presence alone is not enough: tablets list built-in
-// pointer devices nobody uses (a Galaxy Tab's sec_touchpad, a pen, a phone
-// browser reporting a fine pointer), and a mouse that "aims" without being
-// used takes the look from the fingers.
+// Presence is already filtered for pens, folded-away pads and tablet-internal
+// touchpads. A listed mouse takes aim immediately and stays until unplugged.
 qbool VID_TouchMouseConfirmed(void)
 {
-	if (!vid_mouse_confirmed)
-		return false;
-#if !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
-	if (!vid_presence_get()->mouse)
-		return false;
-#endif
-	return vid_mouse_last >= vid_touch_last || host.realtime - vid_mouse_last < VID_MOUSE_HOLD;
+	return cls.state != ca_dedicated && vid_presence_get()->mouse;
 }
 
 qbool VID_HasKeyboard(void)

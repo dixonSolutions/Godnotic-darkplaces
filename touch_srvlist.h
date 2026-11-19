@@ -29,6 +29,7 @@ void TouchSrvList_Shutdown(void);
 // touch_lan.c: once per client frame; once when the file system is up
 void TouchSrvList_Frame(void);
 void TouchSrvList_FirstFrame(void);
+void TouchSrvList_EnsureCache(void);
 // a refresh was started (masters asked, LAN broadcast sent)
 void TouchSrvList_Refresh(qbool resetcache);
 // true: the fast list sent this frame's queries, the stock scheduler stays out

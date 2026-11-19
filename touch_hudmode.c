@@ -509,11 +509,11 @@ static void TouchHudState_f(cmd_state_t *cmd)
 {
 	int me = cl.realplayerentity, i;
 	TouchHudMode_Update();
-	Con_Printf("TOUCHHUD mode=%s join=%s flags=%d spec=%d me=%d playerentity=%d viewentity=%d maxclients=%d frags=%d colors=%d health=%d csqc=%d ours=%d\n",
+	Con_Printf("TOUCHHUD mode=%s join=%s flags=%d spec=%d me=%d playerentity=%d viewentity=%d maxclients=%d frags=%d colors=%d health=%d csqc=%d ours=%d spectatee=%d\n",
 		pub_mode.string, pub_join.string, current.flags, TouchUI_SpectatorState(), me, cl.playerentity, cl.viewentity, cl.maxclients,
 		cl.scores && me >= 1 && me <= cl.maxclients ? cl.scores[me - 1].frags : 12345,
 		cl.scores && me >= 1 && me <= cl.maxclients ? cl.scores[me - 1].colors : -1,
-		cl.stats[STAT_HEALTH], CLVM_prog->loaded, cl_touch_csqc_active);
+		cl.stats[STAT_HEALTH], CLVM_prog->loaded, cl_touch_csqc_active, TouchUI_SpectateeStatus());
 	// whether a menu (the join dialog, the game menu) has the screen
 	Con_Printf("TOUCHMENU up=%d\n", key_dest == key_menu || key_dest == key_menu_grabbed);
 	// what the controls are doing to the player, for the input tests

@@ -34,6 +34,15 @@ struct uibrow_s
 
 #define MAX_SOURCES 48
 #define MAX_PARAMS 12
+#define STABLE_SLOTS 4
+
+typedef struct
+{
+	char **keys;
+	int n, desc, used;
+	double at;              // last use: an order nobody asked for in 30 s is sorted afresh
+	char sort[64], filter[257];
+} stable_t;
 
 typedef struct
 {
@@ -60,6 +69,11 @@ typedef struct
 	char ordsort[64];
 	char ordfilter[257];
 	int ordvalid;
+	// Server rows retain their displayed order between source revisions, one
+	// memo per (sort, direction, filter) so that Home's small preview and the
+	// full list do not overwrite each other's order.
+	stable_t stable[STABLE_SLOTS];
+	int nextstable;
 } source_t;
 
 static source_t sources[MAX_SOURCES];
@@ -250,10 +264,121 @@ static unsigned server_sig(void)
 		h = (h ^ (unsigned)serverlist_cache[i].responded) * 16777619u;
 		for (const char *p = in->map; *p; p++)
 			h = (h ^ (unsigned char)*p) * 16777619u;
+		for (const char *p = in->players; *p; p++)
+			h = (h ^ (unsigned char)*p) * 16777619u;
 	}
 	return h ? h : 1;
 }
+#endif
 
+typedef struct
+{
+	int score, team;
+	qbool has_score, has_team;
+	char name[128];
+} server_player_t;
+
+static int server_player_cmp(const void *av, const void *bv)
+{
+	const server_player_t *a = (const server_player_t *)av;
+	const server_player_t *b = (const server_player_t *)bv;
+	if (a->has_team != b->has_team)
+		return a->has_team ? -1 : 1;
+	if (a->has_team && a->team != b->team)
+		return a->team - b->team;
+	if (a->has_score != b->has_score)
+		return a->has_score ? -1 : 1;
+	if (a->score != b->score)
+		return b->score - a->score;
+	return strcasecmp(a->name, b->name);
+}
+
+static qbool server_int_token(const char *s, int *value)
+{
+	char *end;
+	long n;
+	if (!s || !*s)
+		return false;
+	n = strtol(s, &end, 10);
+	if (*end || n < -999999 || n > 999999)
+		return false;
+	*value = (int)n;
+	return true;
+}
+
+// Status lines are score ping [team] "name". Servers that cannot provide the
+// optional team field still get a score-sorted list; malformed or absent lines
+// are skipped instead of turning into empty player rows.
+size_t TouchSrvInfo_PlayerDetails(const char *status, char *out, size_t outsize)
+{
+	server_player_t players[128];
+	int count = 0;
+	const char *line;
+	if (!out || !outsize)
+		return 0;
+	line = status ? status : "";
+	out[0] = 0;
+	while (*line && count < (int)(sizeof(players) / sizeof(players[0])))
+	{
+		const char *end = strchr(line, '\n');
+		const char *quote = strchr(line, '"');
+		const char *close = quote ? strchr(quote + 1, '"') : NULL;
+		char tokens[3][32] = {{0}};
+		int token_count = 0, score = 0, team = 0;
+		const char *p = line;
+		if (!end) end = line + strlen(line);
+		if (quote && close && quote < end && close < end)
+		{
+			while (p < quote && token_count < 3)
+			{
+				while (p < quote && isspace((unsigned char)*p)) p++;
+				if (p >= quote) break;
+				const char *start = p;
+				while (p < quote && !isspace((unsigned char)*p)) p++;
+				size_t n = min((size_t)(p - start), sizeof(tokens[0]) - 1);
+				memcpy(tokens[token_count], start, n);
+				tokens[token_count++][n] = 0;
+			}
+			if (token_count >= 2)
+			{
+				server_player_t *pl = &players[count];
+				memset(pl, 0, sizeof(*pl));
+				pl->has_score = server_int_token(tokens[0], &score);
+				pl->score = score;
+				if (token_count >= 3 && server_int_token(tokens[2], &team) && team >= 0 && team <= 4)
+				{
+					pl->has_team = true;
+					pl->team = team;
+				}
+				dp_strlcpy(pl->name, quote + 1, sizeof(pl->name));
+				char *name_end = strchr(pl->name, '"');
+				if (name_end) *name_end = 0;
+				if (pl->name[0]) count++;
+			}
+		}
+		line = *end ? end + 1 : end;
+	}
+	qsort(players, count, sizeof(players[0]), server_player_cmp);
+	for (int i = 0; i < count && strlen(out) + 8 < outsize; i++)
+	{
+		const char *team = players[i].team == 1 ? "Red" : players[i].team == 2 ? "Blue" :
+			players[i].team == 3 ? "Yellow" : players[i].team == 4 ? "Pink" : "Spectators";
+		char row[192];
+		if (players[i].has_team && players[i].has_score)
+			dpsnprintf(row, sizeof(row), "%s  %d  %s\n", team, players[i].score, players[i].name);
+		else if (players[i].has_team)
+			dpsnprintf(row, sizeof(row), "%s  —  %s\n", team, players[i].name);
+		else if (players[i].has_score)
+			dpsnprintf(row, sizeof(row), "%d  %s\n", players[i].score, players[i].name);
+		else
+			dpsnprintf(row, sizeof(row), "—  %s\n", players[i].name);
+		if (strlen(out) + strlen(row) >= outsize) break;
+		dp_strlcat(out, row, outsize);
+	}
+	return strlen(out);
+}
+
+#ifdef CONFIG_MENU
 static void build_servers(source_t *s)
 {
 	freerows(s);
@@ -294,6 +419,8 @@ static void build_servers(source_t *s)
 		cell_n(r, "max", in->maxplayers);
 		cell_n(r, "bots", in->numbots);
 		cell_n(r, "ping", in->ping);
+		char player_details[2800];
+		cell_s(r, "player_details", player_details, TouchSrvInfo_PlayerDetails(in->players, player_details, sizeof(player_details)));
 		cell_b(r, "lock", strstr(in->qcstatus, TOUCHLAN_QCSTATUS_LOCK) != NULL);
 		cell_b(r, "fav", in->isfavorite);
 		cell_s(r, "address", in->cname, in->cname_len);
@@ -303,7 +430,9 @@ static void build_servers(source_t *s)
 		size_t vl = ve ? (size_t)(ve - ver) : strlen(ver);
 		cell_s(r, "version", ver, vl < 32 ? vl : 31);
 		// from the saved list, not answered yet this refresh (touch_srvlist.c)
-		cell_b(r, "stale", TouchSrvList_IsStale(i));
+		// A cached row is still usable while its refresh is in flight.  The
+		// scheduler removes it only after the server has actually timed out.
+		cell_b(r, "stale", false);
 	}
 }
 
@@ -456,6 +585,7 @@ static void refresh(source_t *s, int force)
 	s->next_poll = now + (s->kind == 2 ? 0.5 : 0.25); // maps: packs land while the game runs (touch_datafetch.c)
 	if (s->kind == 1)
 	{
+		TouchSrvList_EnsureCache();
 		// A finger on the list (the QuakeC renderer: the engine sees it) or a
 		// renderer that set the source's "hold" param: the rows stay exactly
 		// where they are, and the source catches up on release.
@@ -593,6 +723,10 @@ static int *order(source_t *s, const char *sort, int desc, const char *filter, i
 	if (s->ordvalid && s->ordrev == s->rev && s->orddesc == !!desc
 		&& !strcmp(s->ordsort, sort) && !strcmp(s->ordfilter, filter))
 	{
+		for (int m = 0; m < STABLE_SLOTS && s->kind == 1; m++)
+			if (s->stable[m].used && s->stable[m].desc == !!desc
+				&& !strcmp(s->stable[m].sort, sort) && !strcmp(s->stable[m].filter, filter))
+				s->stable[m].at = UIB_Time();
 		*count = s->ordcount;
 		return s->ord;
 	}
@@ -602,12 +736,54 @@ static int *order(source_t *s, const char *sort, int desc, const char *filter, i
 	for (int i = 0; i < s->nrows; i++)
 		if (row_matches(&s->rows[i], filter))
 			s->ord[n++] = i;
-	if (*sort)
+	stable_t *memo = NULL;
+	if (s->kind == 1)
+	{
+		for (int m = 0; m < STABLE_SLOTS; m++)
+			if (s->stable[m].used && UIB_Time() - s->stable[m].at < 30.0 && s->stable[m].desc == !!desc
+				&& !strcmp(s->stable[m].sort, sort) && !strcmp(s->stable[m].filter, filter))
+			{ memo = &s->stable[m]; break; }
+	}
+	if (memo)
+	{
+		// keep the rows where they were; new ones go last
+		int *prior = (int *)malloc(sizeof(int) * (n + 1));
+		unsigned char *used = (unsigned char *)calloc(n + 1, 1);
+		int k = 0;
+		for (int p = 0; p < memo->n; p++)
+			for (int i = 0; i < n; i++)
+				if (!used[i] && !strcmp(memo->keys[p], s->rows[s->ord[i]].key))
+				{ prior[k++] = s->ord[i]; used[i] = 1; break; }
+		for (int i = 0; i < n; i++)
+			if (!used[i]) prior[k++] = s->ord[i];
+		memcpy(s->ord, prior, sizeof(int) * n);
+		free(prior);
+		free(used);
+	}
+	else if (*sort)
 	{
 		sortkey = sort;
 		sortdesc = desc;
 		sortsrc = s;
 		qsort(s->ord, n, sizeof(int), cmp_rows);
+	}
+	if (s->kind == 1)
+	{
+		if (!memo)
+		{
+			memo = &s->stable[s->nextstable];
+			s->nextstable = (s->nextstable + 1) % STABLE_SLOTS;
+		}
+		for (int i = 0; i < memo->n; i++) free(memo->keys[i]);
+		free(memo->keys);
+		memo->keys = (char **)calloc(n + 1, sizeof(char *));
+		memo->n = n;
+		for (int i = 0; i < n; i++) memo->keys[i] = strdup(s->rows[s->ord[i]].key);
+		memo->desc = !!desc;
+		memo->used = 1;
+		memo->at = UIB_Time();
+		dp_strlcpy(memo->sort, sort, sizeof(memo->sort));
+		dp_strlcpy(memo->filter, filter, sizeof(memo->filter));
 	}
 	s->ordcount = n;
 	s->ordrev = s->rev;
@@ -747,7 +923,15 @@ void UIBSrc_Init(void) {}
 void UIBSrc_Reset(void)
 {
 	for (int i = 0; i < nsources; i++)
-		freerows(&sources[i]), free(sources[i].rows);
+	{
+		freerows(&sources[i]);
+		free(sources[i].rows);
+		for (int m = 0; m < STABLE_SLOTS; m++)
+		{
+			for (int j = 0; j < sources[i].stable[m].n; j++) free(sources[i].stable[m].keys[j]);
+			free(sources[i].stable[m].keys);
+		}
+	}
 	nsources = 0;
 	memset(&lw, 0, sizeof(lw));
 }

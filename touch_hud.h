@@ -16,6 +16,8 @@ screens, such as the end-of-match vote (TouchHUD_CursorFrame).
 #include "qtypes.h"
 
 qbool TouchHUD_HideCursorPic(const char *picname);
+struct prvm_prog_s;
+qbool TouchHUD_HideStockKeyPanel(struct prvm_prog_s *prog);
 
 // Cvars and commands (CL_InitInput).
 void TouchHUD_Init(void);

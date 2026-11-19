@@ -1527,7 +1527,7 @@ static int assign_desk_role(float px, float py)
 		return role_owned(ROLE_WEPGRIP) ? ROLE_IGNORED : ROLE_WEPGRIP;
 	if (strip_hit(px, py) >= 0)
 		return ROLE_WEPSTRIP;
-	return role_owned(ROLE_LOOK) ? ROLE_IGNORED : ROLE_LOOK;
+	return cv("vid_mouse_confirmed", 0) || role_owned(ROLE_LOOK) ? ROLE_IGNORED : ROLE_LOOK;
 }
 
 // touch_hop_mode 3: HOP is a plain button and the keep-jumping chip beside it
@@ -1581,7 +1581,7 @@ static int assign_role(float px, float py)
 		// Waiting to respawn: RESPAWN (HOP's place, a little wider) and the look.
 		if (!in_edge_deadzone(px, py) && hit_rect(px, py, cv("touch_jump_x", 0.855f), cv("touch_jump_y", 0.885f), cv("touch_jump_size", 0.072f), cv("touch_jump_aspect", 2.6f) * 1.25f, 1.10f))
 			return ROLE_RESPAWN;
-		return role_owned(ROLE_LOOK) ? ROLE_IGNORED : ROLE_LOOK;
+		return cv("vid_mouse_confirmed", 0) || role_owned(ROLE_LOOK) ? ROLE_IGNORED : ROLE_LOOK;
 	}
 	// The strip's grip, its NADE row, then its rows: tap a row to switch
 	// (Touch_Weapons_Hit).
@@ -1593,9 +1593,9 @@ static int assign_role(float px, float py)
 		return ROLE_WEPSTRIP;
 	if (in_edge_deadzone(px, py))
 		return ROLE_IGNORED;
-	if (cv("touch_fire_visible", 1) && hit_circle(px, py, cv("touch_fire_x", 0.855f), cv("touch_fire_y", 0.680f), cv("touch_fire_size", 0.160f), 1.15f))
+	if (!cv("vid_mouse_confirmed", 0) && cv("touch_fire_visible", 1) && hit_circle(px, py, cv("touch_fire_x", 0.855f), cv("touch_fire_y", 0.680f), cv("touch_fire_size", 0.160f), 1.15f))
 		return ROLE_FIRE;
-	if (fire2_available() && hit_circle(px, py, cv("touch_fire2_x", 0.770f), cv("touch_fire2_y", 0.755f), cv("touch_fire2_size", 0.100f), 1.15f))
+	if (!cv("vid_mouse_confirmed", 0) && fire2_available() && hit_circle(px, py, cv("touch_fire2_x", 0.770f), cv("touch_fire2_y", 0.755f), cv("touch_fire2_size", 0.100f), 1.15f))
 		return ROLE_FIRE2;
 	if (cv("touch_jump_visible", 1) && hit_rect(px, py, cv("touch_jump_x", 0.855f), cv("touch_jump_y", 0.885f), cv("touch_jump_size", 0.072f), cv("touch_jump_aspect", 2.6f), 1.10f))
 		return ROLE_JUMP;
@@ -1615,19 +1615,19 @@ static int assign_role(float px, float py)
 		return ROLE_RELOAD;
 	if (cv("touch_dodge_visible", 0) && hit_circle(px, py, cv("touch_dodge_x", 0.165f), cv("touch_dodge_y", 0.480f), cv("touch_dodge_size", 0.100f), 1.10f))
 		return ROLE_DODGE;
-	if (in_move_zone(px, py) || (cv("touch_move_visible", 1) && hit_circle(px, py, cv("touch_move_x", 0.170f), cv("touch_move_y", 0.680f), cv("touch_move_size", 0.400f), 1.0f)))
+	if (!cv("vid_keyboard_detected", 0) && (in_move_zone(px, py) || (cv("touch_move_visible", 1) && hit_circle(px, py, cv("touch_move_x", 0.170f), cv("touch_move_y", 0.680f), cv("touch_move_size", 0.400f), 1.0f))))
 	{
 		if (role_owned(ROLE_MOVE))
 			return ROLE_IGNORED;
 		return ROLE_MOVE;
 	}
-	if (in_look_zone(px, py))
+	if (!cv("vid_mouse_confirmed", 0) && in_look_zone(px, py))
 	{
 		if (role_owned(ROLE_LOOK))
 			return ROLE_IGNORED;
 		return ROLE_LOOK;
 	}
-	if (role_owned(ROLE_LOOK))
+	if (cv("vid_mouse_confirmed", 0) || role_owned(ROLE_LOOK))
 		return ROLE_IGNORED;
 	return ROLE_LOOK;
 }
@@ -2225,6 +2225,8 @@ void TouchHUD_Frame(void)
 	qbool look_first = false;
 	qbool desk = desk_active();
 	static qbool was_desk;
+	static int last_mode = -1, last_keyboard = -1, last_mouse = -1;
+	int mode_now = hud_mode(), keyboard_now = (int)cv("vid_keyboard_detected", 0), mouse_now = (int)cv("vid_mouse_confirmed", 0);
 
 	if (!desk && !TouchHUD_Active())
 	{
@@ -2236,6 +2238,9 @@ void TouchHUD_Frame(void)
 	// Controls switched on or off under a finger: start over.
 	if (was_active && desk != was_desk)
 		TouchHUD_ReleaseAll();
+	if (was_active && (mode_now != last_mode || keyboard_now != last_keyboard || mouse_now != last_mouse))
+		TouchHUD_ReleaseAll();
+	last_mode = mode_now; last_keyboard = keyboard_now; last_mouse = mouse_now;
 	was_active = true;
 	was_desk = desk;
 	shapes_probe();
@@ -2798,6 +2803,34 @@ static int chrome_mode_seen = -1;
 static int hud_mode(void) { return TouchHudMode_Current()->mode; }
 static int hud_flags(void) { return TouchHudMode_Current()->flags; }
 static qbool hud_has(int ctl) { return (TouchMode_Controls(hud_mode(), hud_flags()) & ctl) != 0; }
+
+// Foreign Xonotic CSQC builds the spectator prompts and pressed-key pictures
+// itself, without our touch label hooks. Hide those two panels while a touch
+// spectator has no keyboard; the engine's spectator bar supplies the actions.
+qbool TouchHUD_HideStockKeyPanel(prvm_prog_t *prog)
+{
+	int i;
+	if (prog != CLVM_prog || cl_touch_csqc_active || !TouchMode_IsSpectating(hud_mode())
+		|| !(vid_touchscreen.integer || vid_touchscreen_detected.integer) || vid_keyboard_detected.integer)
+		return false;
+	for (i = -1; i < prog->depth; i++)
+	{
+		mfunction_t *f = i < 0 ? prog->xfunction : prog->stack[i].f;
+		const char *name = f ? PRVM_GetString(prog, f->s_name) : "";
+		if (TouchSpec_HideStockPanel(name, 1, 1, 0, 1))
+		{
+			static int reported;
+			int bit = !strcmp(name, "HUD_InfoMessages") ? 1 : 2;
+			if (developer.integer && !(reported & bit))
+			{
+				reported |= bit;
+				Con_DPrintf("Touch HUD: suppressed stock %s\n", name);
+			}
+			return true;
+		}
+	}
+	return false;
+}
 static qbool reduce_motion(void) { return cv("touch_reduce_motion", 0) != 0; }
 
 static qbool spec_hud(void)
@@ -2904,11 +2937,11 @@ static int assign_spec_role(float px, float py)
 			if ((px - cx) * (px - cx) + (py - cy) * (py - cy) <= r * r * 1.1f)
 				return up ? ROLE_SPEC_UP : ROLE_SPEC_DOWN;
 		}
-		if (in_move_zone(px, py)
-			|| (cv("touch_move_visible", 1) && hit_circle(px, py, cv("touch_move_x", 0.170f), cv("touch_move_y", 0.680f), cv("touch_move_size", 0.400f), 1.0f)))
+		if (!cv("vid_keyboard_detected", 0) && (in_move_zone(px, py)
+			|| (cv("touch_move_visible", 1) && hit_circle(px, py, cv("touch_move_x", 0.170f), cv("touch_move_y", 0.680f), cv("touch_move_size", 0.400f), 1.0f))))
 			return role_owned(ROLE_MOVE) ? ROLE_IGNORED : ROLE_MOVE;
 	}
-	return role_owned(ROLE_LOOK) ? ROLE_IGNORED : ROLE_LOOK;
+	return cv("vid_mouse_confirmed", 0) || role_owned(ROLE_LOOK) ? ROLE_IGNORED : ROLE_LOOK;
 }
 
 // The spectator roles' outputs for this frame, folded into TouchHUD_Frame's
@@ -3003,7 +3036,7 @@ static void draw_spec_hud(float a)
 	if (TouchSpec_StickShown(state))
 	{
 		float cx, cy, r;
-		if (cv("touch_move_visible", 1))
+		if (cv("touch_move_visible", 1) && !cv("vid_keyboard_detected", 0))
 			draw_move_stick(a);
 		spec_fly_part(true, &cx, &cy, &r);
 		widget_button(cx, cy, r, "UP", key_moveup, a * 0.9f, C_ACCENT);
@@ -3397,9 +3430,9 @@ void TouchHUD_Draw(void)
 		return;
 	}
 
-	if (cv("touch_move_visible", 1))
+	if (cv("touch_move_visible", 1) && !cv("vid_keyboard_detected", 0))
 		draw_move_stick(a);
-	if (cv("touch_fire_visible", 1))
+	if (cv("touch_fire_visible", 1) && !cv("vid_mouse_confirmed", 0))
 		draw_circle_widget("touch_fire_x", 0.855f, "touch_fire_y", 0.680f, "touch_fire_size", 0.160f, "FIRE", key_attack || TouchAim_AutoFiring(), a, C_DANGER);
 	if (cv("touch_jump_visible", 1))
 	{
@@ -3426,7 +3459,7 @@ void TouchHUD_Draw(void)
 		fade_time = host.realtime;
 		fire2_fade = cv("touch_fire2_visible", 2) > 0 ? TouchAltFire_Fade(fire2_fade, fire2_available(), fade_dt) : 0;
 		zoom_fade = cv("touch_zoom_visible", 2) > 0 ? TouchAltFire_Fade(zoom_fade, zoom_available() || key_zoom, fade_dt) : 0;
-		if (fire2_fade > 0)
+		if (fire2_fade > 0 && !cv("vid_mouse_confirmed", 0))
 			draw_circle_widget("touch_fire2_x", 0.770f, "touch_fire2_y", 0.755f, "touch_fire2_size", 0.100f, "ALT", key_attack2, a * fire2_fade, C_DANGER);
 		if (zoom_fade > 0)
 			draw_circle_widget("touch_zoom_x", 0.860f, "touch_zoom_y", 0.480f, "touch_zoom_size", 0.100f, "ZOOM", key_zoom, a * zoom_fade, C_ACCENT);
@@ -3560,14 +3593,14 @@ void TouchHUD_PrintRects(void)
 		rect_box("RESPAWN", cx, cy, hx * 1.25f, hy);
 		return;
 	}
-	if (cv("touch_move_visible", 1))
+	if (cv("touch_move_visible", 1) && !cv("vid_keyboard_detected", 0))
 	{
 		stick_center(&cx, &cy);
 		Con_Printf("TOUCHRECT c stick %.1f %.1f %.1f\n", cx, cy, stick_radius());
 	}
-	if (cv("touch_fire_visible", 1))
+	if (cv("touch_fire_visible", 1) && !cv("vid_mouse_confirmed", 0))
 		rect_circle("FIRE", "touch_fire_x", 0.855f, "touch_fire_y", 0.680f, "touch_fire_size", 0.160f);
-	if (cv("touch_fire2_visible", 2) > 0)
+	if (cv("touch_fire2_visible", 2) > 0 && !cv("vid_mouse_confirmed", 0))
 		rect_circle("ALT", "touch_fire2_x", 0.770f, "touch_fire2_y", 0.755f, "touch_fire2_size", 0.100f);
 	if (cv("touch_jump_visible", 1))
 		rect_pill("HOP", "touch_jump_x", 0.855f, "touch_jump_y", 0.885f, "touch_jump_size", 0.072f, "touch_jump_aspect", 2.6f);
