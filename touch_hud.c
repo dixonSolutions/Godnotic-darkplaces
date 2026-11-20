@@ -2041,6 +2041,37 @@ static qbool loading_finger(int id, qbool down, float nx, float ny)
 	return true;
 }
 
+static float console_pointer_x = 0.5f, console_pointer_y = 0.5f;
+
+void TouchHUD_NotePointer(float nx, float ny)
+{
+	console_pointer_x = nx;
+	console_pointer_y = ny;
+}
+
+void TouchHUD_DrawConsolePointer(void)
+{
+	float x, y, u, i, n;
+	if (!TouchCursor_ConsolePointer(Cvar_VariableValue(&cvars_all, "vid_system_cursor", ~0) != 0,
+			vid_pointer_mouse.integer, key_consoleactive != 0 && scr_con_current > 0))
+		return;
+	x = bound(0, console_pointer_x, 1) * vid_conwidth.value;
+	y = bound(0, console_pointer_y, 1) * vid_conheight.value;
+	u = vid_conheight.value / 300.0f; // one pixel of a 300-high arrow
+	if (u < 1) u = 1;
+	n = 14; // arrow: a white wedge with a dark rim, tip at the hotspot
+	for (i = 0; i < n; i++)
+	{
+		float w = (i * 0.6f + 1);
+		DrawQ_Fill(x - u, y + i * u * 1.4f - u, (w + 2) * u, u * 1.4f + 2 * u, 0, 0, 0, 0.9f, 0);
+	}
+	for (i = 0; i < n; i++)
+	{
+		float w = (i * 0.6f + 1);
+		DrawQ_Fill(x, y + i * u * 1.4f, w * u, u * 1.4f, 1, 1, 1, 1, 0);
+	}
+}
+
 void TouchHUD_DrawLoading(void)
 {
 	static unsigned int drawn_in_frame;

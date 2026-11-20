@@ -85,7 +85,7 @@ static qbool vid_hasfocus = false;
 static qbool vid_wmborder_waiting, vid_wmborderless;
 static SDL_Joystick *vid_sdljoystick = NULL;
 static SDL_GameController *vid_sdlgamecontroller = NULL;
-static cvar_t vid_system_cursor = {CF_CLIENT | CF_READONLY, "vid_system_cursor", "1", "SDL menus use the system pointer and absolute coordinates"}; // Touch
+static cvar_t vid_system_cursor = {CF_CLIENT | CF_READONLY, "vid_system_cursor", TOUCH_CURSOR_SYSTEM_DEFAULT, "1: SDL menus use the system pointer and absolute coordinates"}; // Touch
 static cvar_t joy_sdl2_trigger_deadzone = {CF_ARCHIVE | CF_CLIENT, "joy_sdl2_trigger_deadzone", "0.5", "deadzone for triggers to be registered as key presses"};
 // GAME_STEELSTORM specific
 static cvar_t *steelstorm_showing_map = NULL; // detect but do not create the cvar
@@ -479,6 +479,7 @@ qbool VID_ShowingKeyboard(void)
 static void VID_SetMouse(qbool relative, qbool hidecursor)
 {
 	if (vid_touchscreen.integer && !vid_pointer_mouse.integer) hidecursor = true; // Touch: every SDL cursor path hides the finger pointer
+	hidecursor = TouchCursor_HideSDL(hidecursor, vid_system_cursor.integer); // Touch: Android draws its own pointer
 	// Android too: with a keyboard and mouse attached the touch controls go
 	// away, and mouselook needs relative mode (pointer capture, Android 8+).
 #if !defined(DP_MOBILETOUCH) || defined(__ANDROID__)
@@ -1166,6 +1167,7 @@ static void VID_NoteMouseMotion(const SDL_MouseMotionEvent *motion)
 	SDL_GetWindowSize(window, &w, &h);
 	if (w <= 0)
 		return;
+	TouchHUD_NotePointer((float)motion->x / (float)w, (float)motion->y / (float)(h > 0 ? h : 1)); // Touch: console pointer
 	travel = (float)(abs(motion->xrel) + abs(motion->yrel)) / (float)w;
 	VID_NoteMouseUse(travel, false);
 }

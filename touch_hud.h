@@ -46,6 +46,11 @@ qbool TouchHUD_FingerIsPointer(void);
 // touchscreen, drawn by DrawLoading; LoadingBack is Escape / Android Back
 // there, true if it cancelled the join.
 void TouchHUD_DrawLoading(void);
+// The mouse pointer over the console, drawn by the engine where SDL's pointer
+// is not trusted (Android). NotePointer takes the last real mouse position as
+// fractions of the window.
+void TouchHUD_NotePointer(float nx, float ny);
+void TouchHUD_DrawConsolePointer(void);
 qbool TouchHUD_LoadingBack(void);
 // A new local game stops after its map loads, before its server spawns (sv_main.c).
 qbool TouchHUD_LoadingCancelled(void);

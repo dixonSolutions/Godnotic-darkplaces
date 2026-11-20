@@ -1890,6 +1890,7 @@ static void SCR_DrawScreen (void)
 		SCR_DrawTouchscreenOverlay();
 		TouchShell_Draw(); // Touch: console button, over the console sheet
 	}
+	TouchHUD_DrawConsolePointer(); // Touch: mouse pointer over the console
 	if (r_timereport_active)
 		R_TimeReport("2d");
 
