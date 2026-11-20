@@ -433,8 +433,8 @@ sv-profile :
 ifeq ($(DP_MAKE_TARGET),linux)# Touch:
 DP_TOUCH_BRIDGE ?= 1# Touch:
 TOUCH_BRIDGE_CACHE ?= $(if $(GODNOTIC_DATACHANNEL_CACHE),$(GODNOTIC_DATACHANNEL_CACHE),$(if $(XDG_CACHE_HOME),$(XDG_CACHE_HOME),$(HOME)/.cache)/godnotic/libdatachannel-4e4f4892dccb2a57fe3a490d0c9d958de4244e74)# Touch:
-TOUCH_BRIDGE_PREFIX := $(TOUCH_BRIDGE_CACHE)/prefix# Touch:
-# Touch: built only where libdatachannel is installed (scripts/build-libdatachannel.sh); the Flatpak and plain builds stay without the relay.
+TOUCH_BRIDGE_PREFIX ?= $(TOUCH_BRIDGE_CACHE)/prefix# Touch:
+# Touch: built only where libdatachannel is installed (scripts/build-libdatachannel.sh, or the Flatpak's libdatachannel module via TOUCH_BRIDGE_PREFIX=/app); a plain build without it stays without the relay.
 ifeq ($(DP_TOUCH_BRIDGE)$(if $(wildcard $(TOUCH_BRIDGE_PREFIX)/lib/libdatachannel.a),1),11)# Touch:
 OBJ_SV += touch_bridge.o# Touch:
 OBJ_SV += touch_bridge_engine.o touch_bridge_signaling.o touch_bridge_mqtt.o touch_bridge_relay.o touch_bridge_relay_engine.o# Touch:
