@@ -68,7 +68,7 @@ typedef struct
 	int orddesc;
 	char ordsort[64];
 	char ordfilter[257];
-	int ordvalid;
+	int ordvalid, ordstable;
 	// Server rows retain their displayed order between source revisions, one
 	// memo per (sort, direction, filter) so that Home's small preview and the
 	// full list do not overwrite each other's order.
@@ -714,16 +714,19 @@ static int row_matches(const uibrow_t *r, const char *filter)
 }
 
 // The visible order: indices into s->rows, filtered and sorted.
-static int *order(source_t *s, const char *sort, int desc, const char *filter, int *count)
+// stable: keep rows where they were between revisions (the bridge's windows); the QuakeC
+// renderer's own windows (Home's top three) always sort afresh
+static int *order(source_t *s, const char *sort, int desc, const char *filter, int stable, int *count)
 {
 	if (!sort) sort = "";
 	if (!filter) filter = "";
 	if (s->kind == 1 && !*sort)
 		sort = "ping";
-	if (s->ordvalid && s->ordrev == s->rev && s->orddesc == !!desc
+	stable = stable && s->kind == 1;
+	if (s->ordvalid && s->ordrev == s->rev && s->orddesc == !!desc && s->ordstable == stable
 		&& !strcmp(s->ordsort, sort) && !strcmp(s->ordfilter, filter))
 	{
-		for (int m = 0; m < STABLE_SLOTS && s->kind == 1; m++)
+		for (int m = 0; m < STABLE_SLOTS && stable; m++)
 			if (s->stable[m].used && s->stable[m].desc == !!desc
 				&& !strcmp(s->stable[m].sort, sort) && !strcmp(s->stable[m].filter, filter))
 				s->stable[m].at = UIB_Time();
@@ -737,7 +740,7 @@ static int *order(source_t *s, const char *sort, int desc, const char *filter, i
 		if (row_matches(&s->rows[i], filter))
 			s->ord[n++] = i;
 	stable_t *memo = NULL;
-	if (s->kind == 1)
+	if (stable)
 	{
 		for (int m = 0; m < STABLE_SLOTS; m++)
 			if (s->stable[m].used && UIB_Time() - s->stable[m].at < 30.0 && s->stable[m].desc == !!desc
@@ -767,7 +770,7 @@ static int *order(source_t *s, const char *sort, int desc, const char *filter, i
 		sortsrc = s;
 		qsort(s->ord, n, sizeof(int), cmp_rows);
 	}
-	if (s->kind == 1)
+	if (stable)
 	{
 		if (!memo)
 		{
@@ -786,6 +789,7 @@ static int *order(source_t *s, const char *sort, int desc, const char *filter, i
 		dp_strlcpy(memo->filter, filter, sizeof(memo->filter));
 	}
 	s->ordcount = n;
+	s->ordstable = stable;
 	s->ordrev = s->rev;
 	s->orddesc = !!desc;
 	dp_strlcpy(s->ordsort, sort, sizeof(s->ordsort));
@@ -837,7 +841,7 @@ void UIBSrc_Window(uibbuf_t *b, int msgid, int64_t re, const char *source, int o
 	if (limit < 1) limit = 1;
 	if (limit > UIB_MAX_WINDOW) limit = UIB_MAX_WINDOW;
 	int count;
-	int *idx = order(s, sort, desc, filter, &count);
+	int *idx = order(s, sort, desc, filter, 1, &count);
 	UIBB_Printf(b, "{\"uib\":1,\"t\":\"rows\",\"id\":%d,\"re\":%lld,\"source\":", msgid, (long long)re);
 	UIBB_Str(b, s->name, strlen(s->name), 0, 0);
 	UIBB_Printf(b, ",\"rev\":%lld,\"total\":%d,\"offset\":%d", (long long)s->rev, count, offset);
@@ -881,7 +885,7 @@ int UIBSrc_LocalWindow(const char *source, int offset, int limit, const char *so
 	if (!filter || !*filter)
 		filter = param(s, "search", "");
 	lw.s = s;
-	lw.idx = order(s, sort, desc, filter, &lw.count);
+	lw.idx = order(s, sort, desc, filter, 0, &lw.count);
 	if (offset < 0) offset = 0;
 	lw.offset = offset;
 	lw.n = lw.count - offset;

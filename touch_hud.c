@@ -635,6 +635,29 @@ static void TouchHUD_RestoreViewmodel_f(cmd_state_t *cmd)
 
 static void TouchHUD_CancelJoin_f(cmd_state_t *cmd);
 
+// Test hooks for the live input tests (tests/touch-detection/match_live.py):
+// a finger without a touchscreen, and the view angles to read back.
+static void TouchHUD_TestFinger_f(cmd_state_t *cmd)
+{
+	int slot = Cmd_Argc(cmd) > 1 ? atoi(Cmd_Argv(cmd, 1)) : 0;
+	if (Cmd_Argc(cmd) < 3 || slot < 0 || slot >= TOUCHHUD_ENGINE_FINGERS - 1)
+	{
+		Con_Print("usage: _touch_test_finger <slot> <0|1 down> [x y]  (x, y 0..1)\n");
+		return;
+	}
+	multitouch[slot][0] = atoi(Cmd_Argv(cmd, 2)) ? slot + 1 : 0;
+	if (Cmd_Argc(cmd) > 4)
+	{
+		multitouch[slot][1] = atof(Cmd_Argv(cmd, 3));
+		multitouch[slot][2] = atof(Cmd_Argv(cmd, 4));
+	}
+}
+
+static void TouchHUD_TestView_f(cmd_state_t *cmd)
+{
+	Con_Printf("TESTVIEW yaw=%.2f pitch=%.2f\n", cl.viewangles[YAW], cl.viewangles[PITCH]);
+}
+
 void TouchHUD_Init(void)
 {
 	TouchHudMode_Init();
@@ -648,6 +671,8 @@ void TouchHUD_Init(void)
 	Cmd_AddCommand(CF_CLIENT, "touch_haptic", TouchHaptic_f, "a button-press vibration, if touch_haptics is on and the device can (the CSQC HUD asks for it)");
 	Cmd_AddCommand(CF_CLIENT, "touch_move", TouchMove_f, "the touch stick's analog move from the CSQC HUD: touch_move <x right> <y down>, length 0..1");
 	Cmd_AddCommand(CF_CLIENT, "_touch_cancel_join", TouchHUD_CancelJoin_f, "stop a connect attempt (CANCEL on the loading screen)");
+	Cmd_AddCommand(CF_CLIENT, "_touch_test_finger", TouchHUD_TestFinger_f, "test hook: _touch_test_finger <slot> <0|1> [x y] puts a finger down or up");
+	Cmd_AddCommand(CF_CLIENT, "_touch_test_view", TouchHUD_TestView_f, "test hook: print the view angles");
 	Cmd_AddCommand(CF_CLIENT, "_touch_restore_viewmodel", TouchHUD_RestoreViewmodel_f, "turn r_drawviewmodel back on once for installs that archived the old forced 0 (queued by Host_Init)");
 }
 

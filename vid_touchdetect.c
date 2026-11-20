@@ -386,6 +386,11 @@ static qbool vid_chassis_is_handheld_or_tablet(int chassis)
 #define VID_ANDROID_VALID    8
 static int vid_android_state;
 static int vid_android_seen;
+// The list says a mouse is there; this says it has moved or clicked. A tablet
+// lists pads of its own that never move a pointer, and with a keyboard
+// attached such a pad read as a mouse: the controls went away and there was no
+// way left to turn. Only a listed mouse that has really been used counts.
+static qbool vid_android_mouse_used;
 
 #ifdef ANDYSU_SWAP
 // The resident loader owns the JNI symbol and forwards device presence to the
@@ -437,7 +442,9 @@ static void vid_presence_compute(vid_presence_t *p)
 		// Until the activity has spoken, a phone is a touch device.
 		p->touch = !(v & VID_ANDROID_VALID) || (v & VID_ANDROID_TOUCH) || vid_touch_finger_seen;
 		p->keyboard = (v & VID_ANDROID_KEYBOARD) != 0;
-		p->mouse = (v & VID_ANDROID_MOUSE) != 0;
+		if (!(v & VID_ANDROID_MOUSE))
+			vid_android_mouse_used = false;
+		p->mouse = (v & VID_ANDROID_MOUSE) != 0 && vid_android_mouse_used;
 	}
 #elif defined(DP_MOBILETOUCH)
 	p->touch = true;
@@ -685,7 +692,17 @@ void VID_NoteMouseUse(float travel, qbool press)
 		if (!vid_presence_get()->mouse)
 			return;
 	}
-#elif !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+#elif defined(__ANDROID__)
+	// Real, non-touch motion or a click. Listed by the activity and used
+	// now: presence follows (vid_android_mouse_used).
+	if (!vid_android_mouse_used && (__atomic_load_n(&vid_android_state, __ATOMIC_ACQUIRE) & VID_ANDROID_MOUSE))
+	{
+		vid_android_mouse_used = true;
+		vid_presence_refresh();
+	}
+	if (!vid_presence_get()->mouse)
+		return;
+#elif !defined(__EMSCRIPTEN__)
 	if (!vid_presence_get()->mouse)
 		return;
 #endif
