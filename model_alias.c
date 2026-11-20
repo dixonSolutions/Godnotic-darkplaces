@@ -273,6 +273,8 @@ static int Mod_Skeletal_CompressBlend(model_t *model, const int *newindex, const
 	return Mod_Skeletal_AddBlend(model, &newweights);
 }
 
+static void Mod_Alias_MorphMesh_EnsureTexVecs(const model_t *model, int subframe); // Touch: lazy per-frame texvecs
+
 static void Mod_MD3_AnimateVertices(const model_t * RESTRICT model, const frameblend_t * RESTRICT frameblend, const skeleton_t *skeleton, float * RESTRICT vertex3f, float * RESTRICT normal3f, float * RESTRICT svector3f, float * RESTRICT tvector3f)
 {
 	// vertex morph
@@ -340,7 +342,9 @@ static void Mod_MD3_AnimateVertices(const model_t * RESTRICT model, const frameb
 		}
 		if (svector3f)
 		{
-			const texvecvertex_t *texvecvert = model->surfmesh.data_morphtexvecvertex + numverts * frameblend[blendnum].subframe;
+			const texvecvertex_t *texvecvert;
+			Mod_Alias_MorphMesh_EnsureTexVecs(model, frameblend[blendnum].subframe); // Touch
+			texvecvert = model->surfmesh.data_morphtexvecvertex + numverts * frameblend[blendnum].subframe;
 			float f = frameblend[blendnum].lerp * (1.0f / 127.0f);
 			if (blendnum == 0)
 			{
@@ -436,7 +440,9 @@ static void Mod_MDL_AnimateVertices(const model_t * RESTRICT model, const frameb
 		}
 		if (svector3f)
 		{
-			const texvecvertex_t *texvecvert = model->surfmesh.data_morphtexvecvertex + numverts * frameblend[blendnum].subframe;
+			const texvecvertex_t *texvecvert;
+			Mod_Alias_MorphMesh_EnsureTexVecs(model, frameblend[blendnum].subframe); // Touch
+			texvecvert = model->surfmesh.data_morphtexvecvertex + numverts * frameblend[blendnum].subframe;
 			float f = frameblend[blendnum].lerp * (1.0f / 127.0f);
 			if (blendnum == 0)
 			{
@@ -724,31 +730,68 @@ static qbool Mod_Alias_CalculateBoundingBox(void)
 	return isanimated;
 }
 
+// Touch: encode the texture vectors of one morph frame (vertex3f/normal3f/svector3f/tvector3f are scratch or the frame 0 buffers)
+static void Mod_Alias_MorphMesh_EncodeTexVecs(const surfmesh_t *sm, int frame, const float *svector3f, const float *tvector3f)
+{
+	int j;
+	texvecvertex_t *dst = sm->data_morphtexvecvertex + (size_t)frame * sm->num_vertices;
+	for (j = 0;j < sm->num_vertices;j++)
+	{
+		VectorScaleCast(svector3f + j * 3, 127.0f, signed char, dst[j].svec);
+		VectorScaleCast(tvector3f + j * 3, 127.0f, signed char, dst[j].tvec);
+	}
+}
+
+// Touch: the texture vectors of a morph frame are only needed to draw that
+// frame with normal mapping. Building all of them at load cost ~0.8 s of a
+// local start (a dedicated server never needs them), so build a frame the
+// first time the renderer asks for it. Frame 0 stays eager (static meshes).
+static void Mod_Alias_MorphMesh_EnsureTexVecs(const model_t *model, int subframe)
+{
+	surfmesh_t *sm = (surfmesh_t *)&model->surfmesh;
+	frameblend_t frameblend[MAX_FRAMEBLENDS];
+	float *scratch;
+	size_t n;
+	if (!sm->data_morphtexvecdone || subframe < 0 || subframe >= sm->num_morphframes || sm->data_morphtexvecdone[subframe])
+		return;
+	n = (size_t)sm->num_vertices * 3;
+	scratch = (float *)Mem_Alloc(tempmempool, n * sizeof(float) * 4);
+	memset(frameblend, 0, sizeof(frameblend));
+	frameblend[0].lerp = 1;
+	frameblend[0].subframe = subframe;
+	model->AnimateVertices(model, frameblend, NULL, scratch, scratch + 3 * n, NULL, NULL);
+	Mod_BuildTextureVectorsFromNormals(0, sm->num_vertices, sm->num_triangles, scratch, sm->data_texcoordtexture2f, scratch + 3 * n, sm->data_element3i, scratch + n, scratch + 2 * n, r_smoothnormals_areaweighting.integer != 0);
+	Mod_Alias_MorphMesh_EncodeTexVecs(sm, subframe, scratch + n, scratch + 2 * n);
+	sm->data_morphtexvecdone[subframe] = 1;
+	TouchLoadTime_Count(TLC_TEXVEC_FRAMES);
+	Mem_Free(scratch);
+}
+
 static void Mod_Alias_MorphMesh_CompileFrames(void)
 {
-	int i, j;
 	frameblend_t frameblend[MAX_FRAMEBLENDS];
 	unsigned char *datapointer;
 	memset(frameblend, 0, sizeof(frameblend));
 	frameblend[0].lerp = 1;
-	datapointer = (unsigned char *)Mem_Alloc(loadmodel->mempool, loadmodel->surfmesh.num_vertices * (sizeof(float[3]) * 4 + loadmodel->surfmesh.num_morphframes * sizeof(texvecvertex_t)));
+	datapointer = (unsigned char *)Mem_Alloc(loadmodel->mempool, loadmodel->surfmesh.num_vertices * (sizeof(float[3]) * 4 + loadmodel->surfmesh.num_morphframes * sizeof(texvecvertex_t)) + loadmodel->surfmesh.num_morphframes);
 	loadmodel->surfmesh.data_vertex3f = (float *)datapointer;datapointer += loadmodel->surfmesh.num_vertices * sizeof(float[3]);
 	loadmodel->surfmesh.data_svector3f = (float *)datapointer;datapointer += loadmodel->surfmesh.num_vertices * sizeof(float[3]);
 	loadmodel->surfmesh.data_tvector3f = (float *)datapointer;datapointer += loadmodel->surfmesh.num_vertices * sizeof(float[3]);
 	loadmodel->surfmesh.data_normal3f = (float *)datapointer;datapointer += loadmodel->surfmesh.num_vertices * sizeof(float[3]);
 	loadmodel->surfmesh.data_morphtexvecvertex = (texvecvertex_t *)datapointer;datapointer += loadmodel->surfmesh.num_morphframes * loadmodel->surfmesh.num_vertices * sizeof(texvecvertex_t);
-	// this counts down from the last frame to the first so that the final data in surfmesh is for frame zero (which is what the renderer expects to be there)
-	for (i = loadmodel->surfmesh.num_morphframes-1;i >= 0;i--)
+	loadmodel->surfmesh.data_morphtexvecdone = datapointer; // Touch: zeroed by Mem_Alloc, frames 1.. are built on first use
+	// the final data in surfmesh is for frame zero (which is what the renderer expects to be there)
+	frameblend[0].subframe = 0;
+	loadmodel->AnimateVertices(loadmodel, frameblend, NULL, loadmodel->surfmesh.data_vertex3f, loadmodel->surfmesh.data_normal3f, NULL, NULL);
+	Mod_BuildTextureVectorsFromNormals(0, loadmodel->surfmesh.num_vertices, loadmodel->surfmesh.num_triangles, loadmodel->surfmesh.data_vertex3f, loadmodel->surfmesh.data_texcoordtexture2f, loadmodel->surfmesh.data_normal3f, loadmodel->surfmesh.data_element3i, loadmodel->surfmesh.data_svector3f, loadmodel->surfmesh.data_tvector3f, r_smoothnormals_areaweighting.integer != 0);
+	Mod_Alias_MorphMesh_EncodeTexVecs(&loadmodel->surfmesh, 0, loadmodel->surfmesh.data_svector3f, loadmodel->surfmesh.data_tvector3f);
+	loadmodel->surfmesh.data_morphtexvecdone[0] = 1;
+	TouchLoadTime_Count(TLC_TEXVEC_FRAMES);
+	if (!TouchModel_LazyTexVecs())
 	{
-		frameblend[0].subframe = i;
-		loadmodel->AnimateVertices(loadmodel, frameblend, NULL, loadmodel->surfmesh.data_vertex3f, loadmodel->surfmesh.data_normal3f, NULL, NULL);
-		Mod_BuildTextureVectorsFromNormals(0, loadmodel->surfmesh.num_vertices, loadmodel->surfmesh.num_triangles, loadmodel->surfmesh.data_vertex3f, loadmodel->surfmesh.data_texcoordtexture2f, loadmodel->surfmesh.data_normal3f, loadmodel->surfmesh.data_element3i, loadmodel->surfmesh.data_svector3f, loadmodel->surfmesh.data_tvector3f, r_smoothnormals_areaweighting.integer != 0);
-		// encode the svector and tvector in 3 byte format for permanent storage
-		for (j = 0;j < loadmodel->surfmesh.num_vertices;j++)
-		{
-			VectorScaleCast(loadmodel->surfmesh.data_svector3f + j * 3, 127.0f, signed char, loadmodel->surfmesh.data_morphtexvecvertex[i*loadmodel->surfmesh.num_vertices+j].svec);
-			VectorScaleCast(loadmodel->surfmesh.data_tvector3f + j * 3, 127.0f, signed char, loadmodel->surfmesh.data_morphtexvecvertex[i*loadmodel->surfmesh.num_vertices+j].tvec);
-		}
+		int i;
+		for (i = 1;i < loadmodel->surfmesh.num_morphframes;i++)
+			Mod_Alias_MorphMesh_EnsureTexVecs(loadmodel, i);
 	}
 }
 

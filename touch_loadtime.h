@@ -43,6 +43,7 @@ typedef enum touch_lt_counter_e
 	TLC_FS_MISS,       // ... that found nothing
 	TLC_FS_DIRSTAT,    // stat() of a loose directory candidate
 	TLC_FILES_LOADED,  // FS_LoadFile successes
+	TLC_TEXVEC_FRAMES, // md3/md2/mdl morph frames whose texture vectors were built
 	TLC_COUNT
 }
 touch_lt_counter_t;
@@ -97,6 +98,10 @@ extern void (*touch_snd_poll)(void);
 #define TOUCH_SFXFLAG_PRELOADED (1u << 27)
 
 // model_shared.c (touch_loadmodel.h), mod_lazyload: Mod_ForName only
+// model_alias.c: build the texture vectors of every morph frame of an
+// md3/md2/mdl at model load (touch_load_lazytexvecs 0) or when a frame is
+// first drawn with tangents (1, default; a dedicated server never builds them)
+qbool TouchModel_LazyTexVecs(void);
 // registers a model inside a precache scope; TouchModel_Ensure loads a model
 // registered that way (the model lookups call it); touch_model_loadsome
 // loads small ones in the game within mod_lazyload_budget.

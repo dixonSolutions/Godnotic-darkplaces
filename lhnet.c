@@ -1037,6 +1037,9 @@ int LHNET_Read(lhnetsocket_t *lhnetsocket, void *content, int maxcontentlength, 
 	int value = 0;
 	if (!lhnetsocket || !address || !content || maxcontentlength < 1)
 		return -1;
+#ifdef __EMSCRIPTEN__ // Touch: no UDP in a browser; datagrams go over the web relay (touch_webnet.c)
+	if (lhnetsocket->address.addresstype != LHNETADDRESSTYPE_LOOP) { extern int TouchWeb_Read(int, void *, int, lhnetaddress_t *); return TouchWeb_Read(lhnetsocket->address.addresstype == LHNETADDRESSTYPE_INET6 ? 6 : 4, content, maxcontentlength, vaddress); } // Touch:
+#endif // Touch:
 	if (lhnetsocket->address.addresstype == LHNETADDRESSTYPE_LOOP)
 	{
 		time_t currenttime;
@@ -1140,6 +1143,9 @@ int LHNET_Write(lhnetsocket_t *lhnetsocket, const void *content, int contentleng
 		return -1;
 	if (lhnetsocket->address.addresstype != address->addresstype)
 		return -1;
+#ifdef __EMSCRIPTEN__ // Touch: no UDP in a browser; datagrams go over the web relay (touch_webnet.c)
+	if (lhnetsocket->address.addresstype != LHNETADDRESSTYPE_LOOP) { extern int TouchWeb_Write(const void *, int, const lhnetaddress_t *); return TouchWeb_Write(content, contentlength, vaddress); } // Touch:
+#endif // Touch:
 	if (lhnetsocket->address.addresstype == LHNETADDRESSTYPE_LOOP)
 	{
 		lhnetpacket_t *p;

@@ -43,6 +43,9 @@ struct cachepic_s
 	struct cachepic_s *chain;
 	// flags - CACHEPICFLAG_NEWPIC for example
 	unsigned int flags;
+	// Touch: the image is being read; the loading screen redraws from inside
+	// that read and asks for this same pic, which decoded it a second time
+	int loading;
 	// name of pic
 	char name[MAX_QPATH];
 };
@@ -123,6 +126,11 @@ cachepic_t *Draw_CachePic_Flags(const char *path, unsigned int cachepicflags)
 		if (!strcmp(path, pic->name))
 		{
 			// if it was created (or replaced) by Draw_NewPic, just return it
+			if (pic->loading) // Touch: its own load is running; wait for it
+			{
+				pic->lastusedframe = draw_frame;
+				return pic;
+			}
 			if (!(pic->flags & CACHEPICFLAG_NEWPIC))
 			{
 				// reload the pic if texflags changed in important ways
@@ -172,6 +180,7 @@ reload:
 	pic->texflags = texflags;
 	pic->autoload = (cachepicflags & CACHEPICFLAG_NOTPERSISTENT) != 0;
 	pic->lastusedframe = draw_frame;
+	pic->loading = true; // Touch
 
 	if (pic->skinframe)
 	{
@@ -190,6 +199,8 @@ reload:
 		pic->width = R_TextureWidth(pic->skinframe->base);
 		pic->height = R_TextureHeight(pic->skinframe->base);
 	}
+
+	pic->loading = false; // Touch
 
 	// check for a low quality version of the pic and use its size if possible, to match the stock hud
 	Image_GetStockPicSize(pic->name, &pic->width, &pic->height);

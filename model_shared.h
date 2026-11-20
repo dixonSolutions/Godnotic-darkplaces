@@ -131,6 +131,7 @@ typedef struct surfmesh_s
 	struct md3vertex_s *data_morphmd3vertex;
 	struct trivertx_s *data_morphmdlvertex;
 	struct texvecvertex_s *data_morphtexvecvertex;
+	unsigned char *data_morphtexvecdone; // Touch: per-frame flag; the texvecs of a morph frame are built when it is first drawn with tangents
 	float *data_morphmd2framesize6f;
 	float num_morphmdlframescale[3];
 	float num_morphmdlframetranslate[3];

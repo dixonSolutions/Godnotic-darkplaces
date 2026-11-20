@@ -648,13 +648,10 @@ void ServerList_QueryList(qbool resetcache, qbool querydp, qbool queryqw, qbool 
 	char dpquery[53]; // theoretical max: 14+22+16+1
 
 #ifdef __EMSCRIPTEN__
-	// A browser has no UDP. Emscripten's sockets send each datagram over a
-	// WebSocket to that host and port, which no master server, LAN broadcast
-	// address or game server answers: every query only fails, noisily. The
-	// list stays empty; local games go over loopback, not through here.
-	if (consoleoutput)
-		Con_Printf("The browser build cannot reach UDP servers: no server list.\n");
-	return;
+	// A browser has no UDP: masters and servers are reached through an
+	// opt-in native relay over WebRTC (touch_webnet.c). Until the page has
+	// one, it looks for one and the list stays as it is.
+	{ extern int TouchWeb_ServerListReady(qbool); if (!TouchWeb_ServerListReady(consoleoutput)) return; } // Touch:
 #endif
 
 	if (resetcache)
@@ -4185,6 +4182,9 @@ void NetConn_Init(void)
 	unsigned j;
 	lhnetaddress_t tempaddress;
 
+#ifdef TOUCH_BRIDGE_ENABLED // Touch:
+	extern void Touch_BridgeInit(void), Touch_BridgeSignalingInit(void); Touch_BridgeInit(); Touch_BridgeSignalingInit(); // Touch:
+#endif // Touch:
 	netconn_mempool = Mem_AllocPool("network connections", 0, NULL);
 	Cmd_AddCommand(CF_SHARED, "net_stats", Net_Stats_f, "print network statistics");
 #ifdef CONFIG_MENU
