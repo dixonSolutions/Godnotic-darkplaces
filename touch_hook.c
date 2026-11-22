@@ -10,6 +10,7 @@ are touch_rescue.h's.
 */
 
 #include "quakedef.h"
+#include "touch_mention.h"
 #include "cl_collision.h"
 #include "csprogs.h"
 #include "touch_hud.h"
@@ -415,7 +416,12 @@ static void TouchHook_Up_f(cmd_state_t *cmd)
 
 int TouchHook_Buttons(void)
 {
-	return th.buttons | TouchDodge_Buttons() | TouchNade_Buttons() | TouchTactics_Buttons();
+	/* The QuakeC chat sheet is not key_message, so cl_input.c's chat button (512, which
+	 * makes the server show the chat bubble) would stay up while a player types in it. */
+	static cvar_t *sheet;
+	if (!sheet)
+		sheet = Cvar_FindVar(&cvars_all, "_touch_chat_sheet", CF_CLIENT);
+	return (sheet && sheet->integer ? 512 : 0) | th.buttons | TouchDodge_Buttons() | TouchNade_Buttons() | TouchTactics_Buttons();
 }
 
 // The server runs the nades mutator (offhand grenades on +hook).
@@ -779,6 +785,8 @@ void TouchHook_Init(void)
 	TouchPause_Init();
 	TouchNade_Init();
 	TouchFE_Init(); // native front-end bridge (touch_frontend.c)
+	TouchMention_Init();
+	TouchChatLog_Init();
 	Cvar_RegisterVariable(&cl_touch_hook_rescue);
 	Cvar_RegisterVariable(&cl_touch_hook_rescue_turn);
 	Cvar_RegisterVariable(&cl_touch_hook_rescue_range);

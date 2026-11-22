@@ -29,6 +29,7 @@
 #include "touch_lua.h" // Touch: Lua mods and plugins
 #include "touch_warm.h" // Touch: menu-idle warm-up
 #include "touch_clipboard.h" // Touch: Ctrl+C copies the line being edited
+#include "touch_mention.h" // Touch: chat mentions and log
 
 cvar_t con_closeontoggleconsole = {CF_CLIENT | CF_ARCHIVE, "con_closeontoggleconsole","1", "allows toggleconsole binds to close the console as well; when set to 2, this even works when not at the start of the line in console input; when set to 3, this works even if the toggleconsole key is the color tag"};
 
@@ -1317,6 +1318,9 @@ Key_Message (cmd_state_t *cmd, int key, int ascii)
 	char vabuf[1024];
 
 	key = Key_Convert_NumPadKey(key);
+
+	if (chat_mode >= 0 && TouchMention_Key(key, ascii)) // Touch: @picker and chat log scrolling
+		return;
 
 	if (key == K_ENTER || key == K_KP_ENTER || ascii == 10 || ascii == 13)
 	{

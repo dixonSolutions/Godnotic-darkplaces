@@ -27,6 +27,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "touch_uib.h" // Touch: one loading presentation
+#include "touch_mention.h" // Touch: chat mentions, typing line, chat log
 #include "thread.h"
 #include "touch_ui.h" // Touch: touch_conback_picture
 
@@ -1199,6 +1200,7 @@ void Con_MaskPrint(unsigned additionalmask, const char *msg)
 				// 3 is just so that a message can be sent to the chatbox without a sound.
 				if (*msg == 1 || *msg == 3)
 					mask = CON_MASK_CHAT;
+				TouchChatLog_Lead(*msg); // Touch: the chat log keeps the chat box lines
 				mask = TouchUIB_ChatboxMask(*msg, mask); // Touch: the game's own lines stay out of the chat feed over play
 
 				line[index++] = STRING_COLOR_TAG;
@@ -1222,6 +1224,7 @@ void Con_MaskPrint(unsigned additionalmask, const char *msg)
 			line[index] = 0;
 			// send to log file
 			Log_ConPrint(line);
+			TouchChatLog_Line(line); // Touch: chat log
 			// send to scrollable buffer
 			if (con_initialized && cls.state != ca_dedicated)
 			{
@@ -2019,10 +2022,11 @@ void Con_DrawNotify (void)
 	}
 	height = numChatlines * con_chatsize.value;
 	TouchUI_PositionChatLog(&x, &v); // Touch: keep the open chat log at the top
+	TouchChatLog_Draw(x, v, vid_conwidth.value * con_chatwidth.value, con_chatsize.value, numChatlines); // Touch: scrolled-back view and export icon
 
 	if(numChatlines)
 	{
-		Con_DrawNotifyRect(CON_MASK_CHAT, CON_MASK_INPUT, con_chattime.value, x, v, vid_conwidth.value * con_chatwidth.value, height, con_chatsize.value, 0.0, 1.0, "^3 ... ");
+		Con_DrawNotifyRect(CON_MASK_CHAT, CON_MASK_INPUT, TouchChatLog_Fade(con_chattime.value), x, v, vid_conwidth.value * con_chatwidth.value, height, con_chatsize.value, 0.0, 1.0, "^3 ... ");
 		v += height;
 	}
 	if (key_dest == key_message)
@@ -2032,6 +2036,7 @@ void Con_DrawNotify (void)
 	}
 	else
 		chat_bufferpos = 0;
+	TouchMention_Draw(x, v, (numChatlines ? con_chatsize : con_notifysize).value); // Touch: typing line and @picker
 
 	if (con_mutex) Thread_UnlockMutex(con_mutex);
 }

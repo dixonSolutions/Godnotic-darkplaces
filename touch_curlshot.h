@@ -133,7 +133,18 @@ static qbool TS_Done(CURL *curl, CURLcode result)
 				if (ok && tzs_crc(out, s->entry.size) == s->entry.crc && TouchJoinPreview_MapName(map, sizeof(map)) && !strcmp(map, s->map))
 				{
 					dpsnprintf(path, sizeof(path), "touch_joinshots/%s_%08x%s", s->map, (unsigned)s->entry.crc, s->entry.ext);
-					if (FS_WriteFile(path, out, s->entry.size)) { dp_strlcpy(ts_map, s->map, sizeof(ts_map)); dp_strlcpy(ts_path, path, sizeof(ts_path)); TouchLoadFS_Changed(); }
+					if (FS_WriteFile(path, out, s->entry.size))
+					{
+						dp_strlcpy(ts_map, s->map, sizeof(ts_map)); dp_strlcpy(ts_path, path, sizeof(ts_path));
+						// keep it for the next time: maps/<map>.<ext> is where the map list, the server dialog and the join card look
+						if ((!strcmp(s->entry.ext, ".jpg") || !strcmp(s->entry.ext, ".png")) && s->map[0] && strspn(s->map, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-") == strlen(s->map))
+						{
+							char keep[MAX_QPATH];
+							dpsnprintf(keep, sizeof(keep), "maps/%s%s", s->map, s->entry.ext);
+							if (!FS_FileExists(keep)) FS_WriteFile(keep, out, s->entry.size);
+						}
+						TouchLoadFS_Changed();
+					}
 				}
 				if (out) Z_Free(out);
 			}

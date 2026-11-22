@@ -466,6 +466,24 @@ static inline const char *TouchJoinDlg_Command(const char *choice, int teams)
 	return "";
 }
 
+// The team an auto-join asks for. pref is touch_autojoin_team ("auto", "red",
+// "blue", "yellow" or "pink"); teams is the server's _teams_available bit mask
+// (1 red, 2 blue, 4 yellow, 8 pink). A fixed team is only asked for on the
+// first try, in a team game, and when the server offers it: a full, locked or
+// balanced team, or anything unknown, falls back to "auto" (the server's own
+// choice), so the setting can never leave a player outside the game.
+static inline const char *TouchJoinDlg_AutoChoice(const char *pref, int teams, int teamgame, int first_try)
+{
+	static const char *const names[4] = {"red", "blue", "yellow", "pink"};
+	int i;
+	if (!teamgame || !first_try || !pref)
+		return "auto";
+	for (i = 0; i < 4; i++)
+		if (!strcmp(pref, names[i]) && (teams & (1 << i)))
+			return names[i];
+	return "auto";
+}
+
 // A local server can receive the choice before its one-second spectator
 // grace period ends. Retry that same choice briefly once it can be accepted.
 typedef struct touchlocaljoin_s

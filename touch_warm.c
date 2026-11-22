@@ -56,13 +56,12 @@ the next game.
 # endif
 #endif
 
-#ifdef __EMSCRIPTEN__
-// the web build fetches maps on demand: preparing one would download it
+// Off by default and not saved: the app never loads a map on its own (the native front end turns it on only while the Singleplayer screen is up). Startup and the idle menu used to load the
+// Home hero's world model (a half-second frame, then models, sounds and shaders) 2 s after launch,
+// which looked like a map load behind Home and competed with the player's first taps. A map loads when
+// a game starts. (The web build also fetches maps on demand, so preparing one would download it.)
 #define TOUCH_WARM_DEFAULT "0"
-#else
-#define TOUCH_WARM_DEFAULT "1"
-#endif
-static cvar_t touch_warm = {CF_CLIENT | CF_ARCHIVE, "touch_warm", TOUCH_WARM_DEFAULT, "while the menu is idle, load the next local game's map, models, sounds and shaders in the background so Play starts sooner (Godnotic)"};
+static cvar_t touch_warm = {CF_CLIENT, "touch_warm", TOUCH_WARM_DEFAULT, "while the menu is idle, load the next local game's map, models, sounds and shaders in the background so Play starts sooner (Godnotic)"};
 static cvar_t touch_warm_idle = {CF_CLIENT, "touch_warm_idle", "2", "seconds without input on the menu before touch_warm starts"};
 static cvar_t touch_warm_budget = {CF_CLIENT, "touch_warm_budget", "12", "milliseconds per frame touch_warm may spend (one model is never split: the world model takes as long as it takes)"};
 static cvar_t touch_warm_map = {CF_CLIENT, "touch_warm_map", "", "map touch_warm prepares (a menu or front end sets it to what its Play button starts); empty = the last local map played"};

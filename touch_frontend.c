@@ -1707,6 +1707,7 @@ void TouchMusic_Update(void)
     static qbool asked_before;
     static qbool said_retry;
     static qbool said_handover;
+    static qbool in_path; // the track itself is in the search path (no fs_rescan needed to play it)
     int stage;
     qbool playing = CDAudio_IsPlaying();
     const char *track = CDAudio_CurrentTrack();
@@ -1733,9 +1734,9 @@ void TouchMusic_Update(void)
         // a theme pk3dir the launcher wrote, or a pk3 the app renamed into
         // place, is in the cached loose-directory listing only after this
         TouchLoadFS_Changed();
-        present = FS_FileExists("touch/music-ready.txt") ||
-            FS_FileExists("sound/cdtracks/rising-of-the-phoenix.ogg") ||
+        in_path = FS_FileExists("sound/cdtracks/rising-of-the-phoenix.ogg") ||
             FS_FileExists("sound/cdtracks/rising-of-the-phoenix.opus");
+        present = in_path || FS_FileExists("touch/music-ready.txt");
         if (!present && host.realtime >= next_rescan)
         {
             // a pk3 the launcher or the app wrote into data/ is only in the
@@ -1761,7 +1762,10 @@ void TouchMusic_Update(void)
         else
         {
             asked_before = true;
-            Cbuf_AddText(cmd_local, "\nmusic_playlist_index -1; menu_cdtrack rising-of-the-phoenix; fs_rescan; cd loop rising-of-the-phoenix\n");
+            // fs_rescan reopens every pack (the maps pack alone is hundreds of ms): only when the
+            // track is not in the search path yet, not for a theme that is already there
+            Cbuf_AddText(cmd_local, in_path ? "\nmusic_playlist_index -1; menu_cdtrack rising-of-the-phoenix; cd loop rising-of-the-phoenix\n"
+                : "\nmusic_playlist_index -1; menu_cdtrack rising-of-the-phoenix; fs_rescan; cd loop rising-of-the-phoenix\n");
             Con_Printf("MUSIC: start menu theme\n");
         }
         CDAudio_FadeIn(0.6); // Touch: a theme that starts swells in

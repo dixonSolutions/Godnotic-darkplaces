@@ -78,7 +78,8 @@ static cvar_t pub_act[TOUCHACT_COUNT] = {
 };
 static cvar_t touch_join_dialog_auto = {CF_CLIENT | CF_ARCHIVE, "touch_join_dialog_auto", "1", "Godnotic: open Xonotic's join dialog (auto-select, the teams, spectate) by itself for an observer when a match starts: 0 never (MENU > Join game opens it), 1 on a device with a touchscreen, 2 always"};
 static cvar_t touch_local_autojoin = {CF_CLIENT | CF_ARCHIVE, "touch_local_autojoin", "1", "Godnotic: join a local campaign automatically when there is no team to pick"};
-static cvar_t touch_always_autojoin = {CF_CLIENT | CF_ARCHIVE, "touch_always_autojoin", "0", "Godnotic: automatically join matches instead of asking for a team or spectator"};
+static cvar_t touch_always_autojoin = {CF_CLIENT | CF_ARCHIVE, "touch_always_autojoin", "1", "Godnotic: join a match straight away, on the team touch_autojoin_team names, instead of asking for a team or spectator (0 asks; a server that refuses the join, a campaign with a fixed team and a player who chose Spectate are left alone)"};
+static cvar_t touch_autojoin_team = {CF_CLIENT | CF_ARCHIVE, "touch_autojoin_team", "auto", "Godnotic: the team touch_always_autojoin asks for in a team game: auto (the server balances), red, blue, yellow or pink; auto when the server does not offer that team"};
 static cvar_t hint_round = {CF_CLIENT, "_touch_hint_round", "0", "set by the port's CSQC: a round-based game with a round under way"};
 static cvar_t hint_carry = {CF_CLIENT, "_touch_hint_carry", "0", "set by the port's CSQC: carrying a flag, key or ball"};
 static cvar_t hint_queued = {CF_CLIENT, "_touch_hint_queued", "0", "set by the port's CSQC: the server queued our join"};
@@ -253,6 +254,25 @@ static void join_choice(const char *text)
 
 
 
+// The setting's auto-join stands down where the player has no say: the server
+// refused or queued the join (locked, full, spectate-only), or a campaign fixes
+// the team (g_campaign_forceteam). touch_join_dialog then asks instead.
+static qbool autojoin_allowed(void)
+{
+	return current.join != TOUCHJOIN_LOCKED && current.join != TOUCHJOIN_QUEUED;
+}
+
+// What the auto-join sends: the default team on the first try only (see
+// TouchJoinDlg_AutoChoice), never in a campaign with a fixed team.
+static const char *autojoin_choice(void)
+{
+	qbool forced = Cvar_VariableValue(&cvars_all, "g_campaign", ~0) != 0
+		&& Cvar_VariableValue(&cvars_all, "g_campaign_forceteam", ~0) >= 1;
+	return TouchJoinDlg_AutoChoice(forced ? "auto" : touch_autojoin_team.string,
+		(int)Cvar_VariableValue(&cvars_all, "_teams_available", ~0),
+		(current.flags & TOUCHMODE_F_TEAMS) != 0, join_dlg.tries >= TOUCHJOINDLG_TRIES - 1);
+}
+
 static qbool screen_free(void)
 {
 	return key_dest == key_game && !(key_consoleactive & KEY_CONSOLEACTIVE_USER) && !cl.csqc_wantsmousemove
@@ -337,7 +357,7 @@ void TouchHudMode_Update(void)
 	switch (TouchJoinDlg_Frame(&join_dlg, current.mode, current.flags,
 		sv.active && touch_local_autojoin.integer, Cvar_VariableValue(&cvars_all, "g_campaign", ~0) == 0 ? 0 :
 		(Cvar_VariableValue(&cvars_all, "g_campaign_forceteam", ~0) >= 1 && Cvar_VariableValue(&cvars_all, "g_campaign_forceteam", ~0) <= 4 ? 2 : 1),
-		screen_free(), join_dialog_here(), touch_always_autojoin.integer, joining, host.realtime))
+		screen_free(), join_dialog_here(), touch_always_autojoin.integer && autojoin_allowed(), joining, host.realtime))
 	{
 	case TOUCHJOINDLG_OPEN:
 		Con_DPrintf("Touch HUD: observer at match start: the join dialog\n");
@@ -347,7 +367,7 @@ void TouchHudMode_Update(void)
 		break;
 	case TOUCHJOINDLG_JOIN:
 		Con_DPrintf("Touch HUD: auto-join: joining\n");
-		join_choice((current.flags & TOUCHMODE_F_TEAMS) ? "cmd selectteam auto; cmd join" : "cmd join");
+		join_choice(TouchJoinDlg_Command(autojoin_choice(), (current.flags & TOUCHMODE_F_TEAMS) != 0));
 		break;
 	default:
 		break;
@@ -553,6 +573,7 @@ void TouchHudMode_Init(void)
 	Cvar_RegisterVariable(&touch_join_dialog_auto);
 	Cvar_RegisterVariable(&touch_local_autojoin);
 	Cvar_RegisterVariable(&touch_always_autojoin);
+	Cvar_RegisterVariable(&touch_autojoin_team);
 	Cvar_RegisterVariable(&hint_round);
 	Cvar_RegisterVariable(&hint_carry);
 	Cvar_RegisterVariable(&hint_queued);

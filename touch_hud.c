@@ -13,6 +13,8 @@ applies to both.
 */
 
 #include "quakedef.h"
+#include "touch_uib.h" // TouchUIB_LoadingCardUp
+#include "touch_frontend.h" // TouchFE_MenuHidden
 #include "libcurl.h"
 #include "cl_screen.h"
 #include "csprogs.h"
@@ -2081,6 +2083,8 @@ void TouchHUD_DrawLoading(void)
 		loading_cancelling = false;
 		return;
 	}
+	if (!loading_cancelling && (TouchUIB_LoadingCardUp() || TouchFE_MenuHidden()))
+		return; // the front end's card has its own Cancel: one button, not two
 	shapes_probe();
 	loading_pill(&cx, &cy, &hx, &hy);
 	// Drawn again in the same frame: a load redrawing its progress, while

@@ -11,6 +11,7 @@
 #include "touch_ui.h"
 #include "touch_hud.h"
 #include "touch_vote.h"
+#include "touch_mention.h" // Touch: roster and typing text
 #include "touch_aim.h" // Touch: offline practice markers
 #include "touch_lua.h" // Touch: Lua mods and plugins
 #include "touch_shellbtn.h" // Touch: console button
@@ -26,6 +27,7 @@
 #include "touch_joinpreview.h" // Touch: the world while a join loads
 #include "touch_joinpreview_logic.h" // Touch: the engine band rule
 #include "touch_uib.h" // Touch: one loading presentation
+#include "touch_frontend.h" // Touch: TouchFE_MenuHidden
 
 cvar_t scr_viewsize = {CF_CLIENT | CF_ARCHIVE, "viewsize","100", "how large the view should be, 110 disables inventory bar, 120 disables status bar"};
 cvar_t scr_fov = {CF_CLIENT | CF_ARCHIVE, "fov","90", "field of vision, 1-170 degrees, default 90, some players use 110-130"};
@@ -1822,6 +1824,8 @@ static void SCR_DrawScreen (void)
 		}
 	}
 
+	TouchMention_Frame(); // Touch: roster and typing text for the chat
+
 	// draw 2D stuff
 
 	if(!scr_con_current && !(key_consoleactive & KEY_CONSOLEACTIVE_FORCED))
@@ -1863,6 +1867,8 @@ static void SCR_DrawScreen (void)
 			SCR_DrawLoadingStack();
 		else if (TouchJoinPreview_DrawLevelshot()) // Touch: the map's levelshot until its world is there
 			SCR_DrawLoadingStack(); // Touch: the bar stays over it
+		else if (TouchUIB_LoadingCardUp() || TouchFE_MenuHidden()) // Touch: the app's card is the loading screen: no logo behind it
+			;
 		else
 		// connect_status replaces any dummy_status
 		if ((!loadingscreenstack || loadingscreenstack->msg[0] == '\0') && cl_connect_status[0] != '\0')

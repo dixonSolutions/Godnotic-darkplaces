@@ -38,6 +38,8 @@ OBJ_COMMON= \
 	touch_hud.o \
 	touch_aim.o \
 	touch_hook.o \
+	touch_mention.o \
+	touch_chatlog.o \
 	touch_turn.o \
 	touch_vote.o \
 	touch_hudmode.o \
