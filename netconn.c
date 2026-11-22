@@ -1656,6 +1656,7 @@ static int NetConn_ReceivedMessage(netconn_t *conn, const unsigned char *data, s
 				sendme = Crypto_EncryptPacket(&conn->crypto, temppacket, 8, &cryptosendbuffer, &sendmelen, sizeof(cryptosendbuffer));
 				if(sendme)
 					NetConn_Write(conn->mysocket, sendme, (int)sendmelen, &conn->peeraddress);
+				TouchNet_AckAgain(conn, sendme, sendmelen); // Touch: a lost ACK costs a stock sender a second
 				if (sequence == conn->nq.receiveSequence)
 				{
 					conn->lastMessageTime = host.realtime;
@@ -2775,6 +2776,7 @@ void NetConn_ClientFrame(void)
 			return;
 		}
 		cls.connect_nextsendtime = host.realtime + 1;
+		TouchNet_ConnectPace(); // Touch: the first repeats of a lost request come sooner
 
 		// try challenge first (newer DP server or QW)
 		NetConn_WriteString(cls.connect_mysocket, "\377\377\377\377getchallenge", &cls.connect_address);

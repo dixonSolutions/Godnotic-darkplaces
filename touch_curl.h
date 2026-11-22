@@ -22,6 +22,31 @@
 static cvar_t curl_segments = {CF_CLIENT | CF_ARCHIVE, "curl_segments", "6", "connections one large HTTP download may use at once (Godnotic, docs/NETWORK.md); 1 = one, as stock"};
 static cvar_t curl_segment_size = {CF_CLIENT | CF_ARCHIVE, "curl_segment_size", "2097152", "smallest piece in bytes worth its own connection when a download is split"};
 
+static cvar_t curl_retries = {CF_CLIENT | CF_ARCHIVE, "curl_retries", "6", "times a failed download the current map needs (curl --forthismap) is tried again, resuming the file from where it stopped, 1, 2, 4, 8, 15 and 15 s apart, before the join goes on without it (Godnotic); 0 = stock, the first failure ends it"};
+
+// downloads waiting to be tried again (touch_curl.h, TouchCurl_Retry)
+typedef struct tc_retry_s
+{
+	struct tc_retry_s *next;
+	char url[1024];
+	char name[MAX_QPATH]; // as Curl_Begin_ToFile wants it, without dlcache/
+	char fn[MAX_QPATH];   // dlcache/<name>
+	double maxspeed;
+	int loadtype;
+	int tries;
+	double due;           // realtime of the next attempt; 0 while one is running
+}
+tc_retry_t;
+static tc_retry_t *tc_retries;
+
+static void TouchCurl_RetryFrame(void);
+static downloadinfo *Curl_Find(const char *filename);
+#include "touch_net.h" // TouchCurl_ManualRetry
+#ifndef _WIN32
+#include <dirent.h>
+#include <unistd.h>
+#endif
+
 #define TC_MAXSEG 7
 
 struct tc_dl_s;
@@ -406,6 +431,423 @@ static void TouchCurl_Info(downloadinfo *di, double *progress, double *speed, in
 
 void TouchCurl_Init(void)
 {
+	Cvar_RegisterVariable(&curl_retries);
 	Cvar_RegisterVariable(&curl_segments);
 	Cvar_RegisterVariable(&curl_segment_size);
+}
+
+// libcurl.c Curl_EndDownload, before it counts a download for this map as a
+// failure. Stock DarkPlaces counts the first failure (a reset connection, 45 s
+// under 256 B/s, a 5xx, a pack that did not open) and, when the last download
+// is done, goes on to the precache without the file: "cannot load map". A map
+// pack from a public server is tens of MB over Wi-Fi, and servers send a dozen
+// packs; one stumble was the whole join. Here a failure waits and starts the
+// same download again: the partial file is resumed (Curl_Begin's own resume),
+// and while the attempt is pending the download still counts as "added", so
+// the client keeps waiting. Returns true when a new attempt is planned.
+static qbool TouchCurl_Retry(downloadinfo *di, int status, CURLcode error)
+{
+	tc_retry_t *r;
+	int max = curl_retries.integer;
+	if (max <= 0 || status == 2 /* CURL_DOWNLOAD_ABORTED, declared below */ || di->buffer || di->post_content_type || strncmp(di->filename, "dlcache/", 8))
+		return false;
+	for (r = tc_retries; r; r = r->next)
+		if (!strcmp(r->fn, di->filename))
+			break;
+	if (!r)
+	{
+		r = (tc_retry_t *)Z_Malloc(sizeof(*r));
+		dp_strlcpy(r->fn, di->filename, sizeof(r->fn));
+		r->next = tc_retries;
+		tc_retries = r;
+	}
+	if (r->tries >= max)
+	{
+		Con_Printf("Download of %s failed for good after %d tries (curl error %d)\n", di->filename + 8, r->tries + 1, (int)error);
+		r->due = -1; // dropped by the sweep in TouchCurl_RetryFrame
+		return false;
+	}
+	dp_strlcpy(r->url, di->url, sizeof(r->url));
+	dp_strlcpy(r->name, di->filename + 8, sizeof(r->name));
+	r->maxspeed = di->maxspeed;
+	r->loadtype = di->loadtype;
+	r->due = host.realtime + (r->tries < 4 ? (double)(1 << r->tries) : 15.0);
+	r->tries++;
+	Con_Printf("Download of %s failed (curl error %d, %.0f KB so far): trying again in %.0f s (%d of %d)\n", r->name, (int)error,
+		(double)(di->startpos + (fs_offset_t)di->bytes_received) / 1024.0, r->due - host.realtime, r->tries, max);
+	return true;
+}
+
+// a download finished: its retry entry is done
+static void TouchCurl_RetryDone(downloadinfo *di)
+{
+	tc_retry_t *r;
+	for (r = tc_retries; r; r = r->next)
+		if (!strcmp(r->fn, di->filename))
+			r->due = -1;
+}
+
+// every Curl_Frame: start the attempts that are due
+static void TouchCurl_RetryFrame(void)
+{
+	tc_retry_t **link = &tc_retries, *r;
+	while ((r = *link))
+	{
+		if (r->due < 0)
+		{
+			*link = r->next;
+			Z_Free(r);
+			continue;
+		}
+		if (r->due > 0 && host.realtime >= r->due)
+		{
+			int before = numdownloads_added;
+			qbool began;
+			r->due = 0;
+			began = Curl_Begin_ToFile(r->url, r->maxspeed, r->name, r->loadtype, true);
+			// the attempt that failed was already counted as added
+			if (numdownloads_added > before)
+				numdownloads_added = before;
+			else if (!began)
+				++numdownloads_fail; // could not even start: now it is a failure
+		}
+		link = &r->next;
+	}
+}
+
+
+/*
+Resuming only onto the same file, and using only a pack that is whole
+-----------------------------------------------------------------------
+A partial download is kept with the server's validator (ETag, else
+Last-Modified) in <file>.meta. A resume asks for the bytes after what is on
+disk, which is only right if the file on the server is still the one the
+partial came from; a partial with no .meta (an older version's, or a crash)
+or with another validator starts again from byte 0. A finished pack is read
+before it is used: its end-of-central-directory record, and every central
+directory entry must point at a local file header. That catches a truncated
+file, one with a hole in the middle, or an HTML error page, none of which the
+pack opener (which reads the directory only) reliably does. A file that
+fails is emptied and the download counts as a failed attempt, tried again from
+byte 0 (TouchCurl_Retry). Startup, and a manual Retry, delete every pk3 in
+dlcache that has no .meta and fails the same check.
+*/
+
+typedef struct tc_hdr_s
+{
+	struct tc_hdr_s *next;
+	downloadinfo *di;
+	char stored[200]; // the validator the partial came from ("" = none known)
+	qbool resuming;
+	qbool mismatch;   // the file on the server changed: start again
+} tc_hdr_t;
+static tc_hdr_t *tc_hdrs;
+static qbool tc_swept;
+
+static void TC_RealPath(char *out, size_t size, const char *fn, const char *suffix)
+{
+	dpsnprintf(out, size, "%s%s%s", fs_gamedir, fn, suffix);
+}
+
+static void TC_ReadMeta(const char *fn, char *out, size_t size)
+{
+	char path[MAX_OSPATH];
+	FILE *f;
+	out[0] = 0;
+	TC_RealPath(path, sizeof(path), fn, ".meta");
+	if ((f = fopen(path, "rb")))
+	{
+		size_t n = fread(out, 1, size - 1, f);
+		out[n] = 0;
+		fclose(f);
+	}
+}
+
+static void TC_WriteMeta(const char *fn, const char *value)
+{
+	char path[MAX_OSPATH];
+	FILE *f;
+	TC_RealPath(path, sizeof(path), fn, ".meta");
+	if ((f = fopen(path, "wb")))
+	{
+		fputs(value, f);
+		fclose(f);
+	}
+}
+
+static void TC_DropMeta(const char *fn)
+{
+	char path[MAX_OSPATH];
+	TC_RealPath(path, sizeof(path), fn, ".meta");
+	remove(path);
+}
+
+static void TC_Empty(const char *fn)
+{
+	char path[MAX_OSPATH];
+	FILE *f;
+	TC_RealPath(path, sizeof(path), fn, "");
+	if ((f = fopen(path, "wb")))
+		fclose(f);
+}
+
+static unsigned TC_U16(const unsigned char *p) { return p[0] | (p[1] << 8); }
+static unsigned TC_U32(const unsigned char *p) { return p[0] | (p[1] << 8) | (p[2] << 16) | ((unsigned)p[3] << 24); }
+
+// a zip (pk3) whose directory is whole and whose entries all start at a local file header
+static qbool TC_ZipOK(const char *path, const char **why)
+{
+	FILE *f = fopen(path, "rb");
+	unsigned char head[4], tail[65557 + 22], *eocd = NULL, *cd = NULL, local[4], *p;
+	long size, tailstart, tailsize;
+	unsigned entries, cdsize, cdoff, i, nlen, elen, clen, off;
+	qbool ok = false;
+	*why = "unreadable";
+	if (!f)
+		return false;
+	if (fseek(f, 0, SEEK_END) || (size = ftell(f)) < 22 || fseek(f, 0, SEEK_SET) || fread(head, 1, 4, f) != 4)
+	{
+		*why = "too short";
+		goto done;
+	}
+	if (!memcmp(head, "PACK", 4))
+	{
+		ok = true; // a quake pak: not checked here
+		goto done;
+	}
+	if (memcmp(head, "PK\3\4", 4))
+	{
+		*why = "not a zip";
+		goto done;
+	}
+	tailsize = size < (long)sizeof(tail) ? size : (long)sizeof(tail);
+	tailstart = size - tailsize;
+	if (fseek(f, tailstart, SEEK_SET) || fread(tail, 1, (size_t)tailsize, f) != (size_t)tailsize)
+		goto done;
+	for (p = tail + tailsize - 22; p >= tail; p--)
+		if (!memcmp(p, "PK\5\6", 4))
+		{
+			eocd = p;
+			break;
+		}
+	if (!eocd)
+	{
+		*why = "no end-of-directory record";
+		goto done;
+	}
+	entries = TC_U16(eocd + 10);
+	cdsize = TC_U32(eocd + 12);
+	cdoff = TC_U32(eocd + 16);
+	if (cdoff == 0xFFFFFFFFu || entries == 0xFFFFu)
+	{
+		ok = true; // zip64: not checked here
+		goto done;
+	}
+	if ((long)cdoff + (long)cdsize > size || cdsize > (32u << 20))
+	{
+		*why = "directory beyond the end of the file";
+		goto done;
+	}
+	cd = (unsigned char *)Z_Malloc(cdsize + 1);
+	if (fseek(f, (long)cdoff, SEEK_SET) || fread(cd, 1, cdsize, f) != cdsize)
+	{
+		*why = "directory unreadable";
+		goto done;
+	}
+	for (i = 0, p = cd; i < entries; i++)
+	{
+		if ((size_t)(p - cd) + 46 > cdsize || memcmp(p, "PK\1\2", 4))
+		{
+			*why = "damaged directory";
+			goto done;
+		}
+		off = TC_U32(p + 42);
+		nlen = TC_U16(p + 28); elen = TC_U16(p + 30); clen = TC_U16(p + 32);
+		if ((long)off + 4 > (long)cdoff || fseek(f, (long)off, SEEK_SET) || fread(local, 1, 4, f) != 4 || memcmp(local, "PK\3\4", 4))
+		{
+			*why = "an entry does not start at a file header";
+			goto done;
+		}
+		p += 46 + nlen + elen + clen;
+	}
+	ok = true;
+done:
+	if (cd)
+		Z_Free(cd);
+	if (f)
+		fclose(f);
+	return ok;
+}
+
+// libcurl.c, a download finished: usable? A pack that is not is emptied, and the
+// attempt is a failure (TouchCurl_Ended tries it again from byte 0)
+static qbool TouchCurl_Verify(downloadinfo *di)
+{
+	char path[MAX_OSPATH];
+	const char *why;
+	if (di->loadtype != LOADTYPE_PAK || di->buffer || strncmp(di->filename, "dlcache/", 8))
+		return true;
+	TC_RealPath(path, sizeof(path), di->filename, "");
+	if (TC_ZipOK(path, &why))
+		return true;
+	Con_Printf("Download of %s is not a whole pack (%s): deleted, fetching it again\n", di->filename + 8, why);
+	TC_Empty(di->filename);
+	TC_DropMeta(di->filename);
+	return false;
+}
+
+static size_t TC_Header(char *buf, size_t size, size_t nmemb, void *vdi)
+{
+	size_t len = size * nmemb;
+	downloadinfo *di = (downloadinfo *)vdi;
+	tc_hdr_t *h;
+	char line[260], *colon;
+	size_t n = len < sizeof(line) - 1 ? len : sizeof(line) - 1;
+	for (h = tc_hdrs; h && h->di != di; h = h->next) {}
+	if (!h)
+		return len;
+	memcpy(line, buf, n);
+	line[n] = 0;
+	while (n && (line[n - 1] == '\r' || line[n - 1] == '\n' || line[n - 1] == ' '))
+		line[--n] = 0;
+	if (!strncasecmp(line, "HTTP/", 5))
+		return len; // a new response (a redirect has several)
+	if (!(colon = strchr(line, ':')))
+		return len;
+	*colon++ = 0;
+	while (*colon == ' ')
+		colon++;
+	if (!strcasecmp(line, "etag") || !strcasecmp(line, "last-modified"))
+	{
+		char value[220];
+		dpsnprintf(value, sizeof(value), "%s: %s", line, colon);
+		if (h->resuming && h->stored[0] && strcmp(h->stored, value) && !strncmp(h->stored, value, strlen(line) + 1))
+		{
+			h->mismatch = true;
+			return 0; // abort: not the file the partial came from
+		}
+		if (!h->resuming || !h->stored[0] || !strcmp(h->stored, value))
+			TC_WriteMeta(di->filename, value);
+	}
+	return len;
+}
+
+// libcurl.c, a download is set up (before RESUME_FROM is set): decide whether
+// the partial on disk may be resumed, and listen for the server's validator
+static void TouchCurl_Headers(downloadinfo *di)
+{
+	tc_hdr_t *h;
+	if (di->buffer || di->post_content_type || strncmp(di->filename, "dlcache/", 8) || !qcurl_easy_setopt)
+		return;
+	h = (tc_hdr_t *)Z_Malloc(sizeof(*h));
+	h->di = di;
+	TC_ReadMeta(di->filename, h->stored, sizeof(h->stored));
+	if (di->startpos > 0 && !h->stored[0])
+	{
+		// no record of where the partial came from: not resumed
+		Con_Printf("Download of %s: %ld KB on disk with no record of its source, starting again\n", di->filename + 8, (long)(di->startpos / 1024));
+		FS_Close(di->stream);
+		TC_Empty(di->filename);
+		di->stream = FS_OpenRealFile(di->filename, "ab", false);
+		di->startpos = 0;
+	}
+	h->resuming = di->startpos > 0;
+	if (!h->resuming)
+		TC_WriteMeta(di->filename, "none"); // a partial with no validator from the server still resumes
+	h->next = tc_hdrs;
+	tc_hdrs = h;
+	qcurl_easy_setopt(di->curle, (CURLoption)(CURLOPTTYPE_FUNCTIONPOINT + 79), TC_Header); // CURLOPT_HEADERFUNCTION
+	qcurl_easy_setopt(di->curle, (CURLoption)(CURLOPTTYPE_OBJECTPOINT + 29), (void *)di);  // CURLOPT_HEADERDATA
+}
+
+static qbool TC_HdrMismatch(downloadinfo *di, qbool free_it)
+{
+	tc_hdr_t **link = &tc_hdrs, *h;
+	qbool m = false;
+	while ((h = *link))
+	{
+		if (h->di == di)
+		{
+			m = h->mismatch;
+			if (free_it)
+			{
+				*link = h->next;
+				Z_Free(h);
+			}
+			return m;
+		}
+		link = &h->next;
+	}
+	return false;
+}
+
+// delete every pk3 in dlcache that has no .meta (so is no partial download) and is not a whole pack
+static void TouchCurl_Sweep(void)
+{
+#ifndef _WIN32
+	char dir[MAX_OSPATH], path[MAX_OSPATH], fn[MAX_QPATH], meta[MAX_OSPATH];
+	struct dirent *e;
+	DIR *d;
+	const char *why;
+	dpsnprintf(dir, sizeof(dir), "%sdlcache", fs_gamedir);
+	if (!(d = opendir(dir)))
+		return;
+	while ((e = readdir(d)))
+	{
+		size_t n = strlen(e->d_name);
+		if (n < 5 || strcasecmp(e->d_name + n - 4, ".pk3"))
+			continue;
+		dpsnprintf(fn, sizeof(fn), "dlcache/%s", e->d_name);
+		dpsnprintf(path, sizeof(path), "%s/%s", dir, e->d_name);
+		dpsnprintf(meta, sizeof(meta), "%s.meta", path);
+		if (access(meta, F_OK) == 0 || Curl_Find(fn))
+			continue;
+		if (!TC_ZipOK(path, &why))
+		{
+			Con_Printf("dlcache/%s is not a whole pack (%s): deleted\n", e->d_name, why);
+			remove(path);
+		}
+	}
+	closedir(d);
+#endif
+}
+
+// join_retry (touch_joinfail.c): waiting retries go at once, the cache is swept
+void TouchCurl_ManualRetry(void)
+{
+	tc_retry_t *r;
+	for (r = tc_retries; r; r = r->next)
+		if (r->due > 0)
+		{
+			r->due = host.realtime;
+			r->tries = 0;
+		}
+	TouchCurl_Sweep();
+}
+
+// libcurl.c Curl_EndDownload, before the download is counted: true = a new
+// attempt is planned, count nothing yet
+static qbool TouchCurl_Ended(downloadinfo *di, int status, qbool ok, CURLcode error)
+{
+	qbool changed = TC_HdrMismatch(di, true), retry;
+	if (ok)
+	{
+		TouchCurl_RetryDone(di);
+		if (!strncmp(di->filename, "dlcache/", 8))
+			TC_DropMeta(di->filename);
+		return false;
+	}
+	if (changed || status == 3 /* CURL_DOWNLOAD_SERVERERROR: a 416 or another HTTP error */)
+	{
+		// the partial is no good (another file on the server, a range it cannot serve)
+		if (!strncmp(di->filename, "dlcache/", 8))
+		{
+			TC_Empty(di->filename);
+			TC_DropMeta(di->filename);
+		}
+		if (changed)
+			Con_Printf("Download of %s: the file on the server changed, starting again\n", di->filename + 8);
+	}
+	retry = di->forthismap && TouchCurl_Retry(di, status, error);
+	return retry;
 }

@@ -24,6 +24,7 @@ touch_joinfail_logic.h.
 #include "quakedef.h"
 #include "netconn.h"
 #include "touch_joinfail.h"
+#include "touch_net.h"
 #include "touch_joinfail_logic.h"
 #include "touch_nativefe.h"
 #include "touch_datafetch.h"
@@ -216,6 +217,7 @@ static void TouchJoinFail_Retry_f(cmd_state_t *cmd)
 		Con_Print("join_retry: no join has failed\n");
 		return;
 	}
+	TouchCurl_ManualRetry(); // Touch: waiting download retries go at once; bad packs in dlcache are deleted
 	dpsnprintf(line, sizeof(line), "\nconnect \"%s\"\n", join_fail_address.string);
 	Cbuf_AddText(cmd_local, line);
 }

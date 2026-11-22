@@ -147,9 +147,9 @@ static inline int TouchJoinFail_Classify(const char *status, int nchallenges, in
 				if (n >= sizeof(name)) n = sizeof(name) - 1;
 				memcpy(name, map + 16, n);
 				name[n] = 0;
-				TouchJoinFail_Clean(clean, sizeof(clean), name);
-				TOUCH_SNPRINTF(text, textsize, "Missing files: could not get the map %s", clean);
-				TOUCH_SNPRINTF(detail, detailsize, "The download from the server did not finish. Check the connection and retry; the part already downloaded is kept.");
+				TouchJoinFail_Clean(clean, sizeof(clean), !strncmp(name, "maps/", 5) ? name + 5 : name);
+				TOUCH_SNPRINTF(text, textsize, "Could not download map %s", clean);
+				TOUCH_SNPRINTF(detail, detailsize, "Tap Retry: it picks up where it stopped.");
 				return TOUCHJOINFAIL_FILES;
 			}
 			TouchJoinFail_Clean(clean, sizeof(clean), r + 12);

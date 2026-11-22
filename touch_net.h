@@ -69,6 +69,8 @@ void TouchNet_Frame(double worktime);
 // HTTP downloads on the loading screen (libcurl.c, cl_screen.c): the bytes
 // a download has, and its line with the size and the time left
 void TouchNet_CurlProgress(int index, double bytes);
+// touch_curl.h: join_retry sends waiting download retries at once and sweeps dlcache of bad packs
+void TouchCurl_ManualRetry(void);
 // the bytes of download `index` fetched so far (over all its pieces), 0 when unknown
 double TouchNet_CurlBytes(int index);
 // touch_curl.h (in libcurl.c): curl_segments and curl_segment_size
@@ -85,6 +87,12 @@ void TouchNet_Disconnecting(qbool kicked, const char *reason);
 void TouchNet_Away(qbool away);
 // what the automatic reconnect is doing, or NULL when nothing
 const char *TouchNet_ReconnectState(void);
+
+// netconn.c: the client's ACK of reliable data, sent a second time
+void TouchNet_AckAgain(struct netconn_s *conn, const void *packet, size_t length);
+
+// netconn.c NetConn_ClientFrame: the first repeats of a join's request come sooner
+void TouchNet_ConnectPace(void);
 
 // trace (NetConn_Read / NetConn_Write)
 void TouchNet_TracePacket(struct lhnetsocket_s *mysocket, const void *data, int length, const struct lhnetaddress_s *peeraddress, int sent);

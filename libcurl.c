@@ -617,6 +617,7 @@ static void Curl_EndDownload(downloadinfo *di, CurlStatus status, CURLcode error
 	} \
 	while(0)
 
+	if(ok && !TouchCurl_Verify(di)) ok = false; // Touch: a pack with holes or a truncated tail is not used
 	if(ok && di->loadtype == LOADTYPE_PAK)
 	{
 		ok = FS_AddPack(di->filename, NULL, true, true);
@@ -661,6 +662,7 @@ static void Curl_EndDownload(downloadinfo *di, CurlStatus status, CURLcode error
 	List_Delete(&di->list);
 
 	--numdownloads;
+	if(TouchCurl_Ended(di, status, ok, error)) di->forthismap = false; // Touch: a failed download for this map is tried again, resuming
 	if(di->forthismap)
 	{
 		if(ok)
@@ -775,6 +777,7 @@ static void CheckPendingDownloads(void)
 				if(developer_curl.integer) 
 					qcurl_easy_setopt(di->curle, CURLOPT_VERBOSE, (long) 1);
 				qcurl_easy_setopt(di->curle, CURLOPT_REFERER, di->referer);
+				TouchCurl_Headers(di); // Touch: resume only onto the same file on the server
 				qcurl_easy_setopt(di->curle, CURLOPT_RESUME_FROM, (long) di->startpos);
 				qcurl_easy_setopt(di->curle, CURLOPT_FOLLOWLOCATION, 1);
 				qcurl_easy_setopt(di->curle, CURLOPT_WRITEFUNCTION, CURL_fwrite);
@@ -1188,6 +1191,8 @@ void Curl_Frame(void)
 
 	if (curl_mutex) Thread_LockMutex(curl_mutex);
 
+	TouchCurl_RetryFrame(); // Touch: the attempts of failed downloads that are due
+	if(!tc_swept && fs_gamedir[0]) { tc_swept = true; TouchCurl_Sweep(); } // Touch: bad packs left in dlcache
 	Curl_CheckCommandWhenDone();
 
 	if(List_Is_Empty(&downloads))

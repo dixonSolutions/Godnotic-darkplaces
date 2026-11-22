@@ -61,6 +61,10 @@ static cvar_t net_signon_fast = {CF_CLIENT | CF_SERVER, "net_signon_fast", "1", 
 static cvar_t net_mtu = {CF_SERVER, "net_mtu", "0", "path MTU in bytes for clients' datagrams (Godnotic): 0 = the route's MTU to each client, as the system knows it (a VPN interface's 1280, say); no datagram is then an IP fragment"};
 static cvar_t touch_net_trace = {CF_CLIENT | CF_SERVER, "touch_net_trace", "0", "print every packet of a join with a timestamp (Godnotic, for scripts/net-trace-report.py); 2 = every packet, in the game too"};
 
+static cvar_t net_connect_retry = {CF_CLIENT | CF_ARCHIVE, "net_connect_retry", "0.4", "seconds before the first, and 2x before the second, repeat of a join's getchallenge when nothing answered (Godnotic; later repeats stay at 1 s); 0 = stock, a full second each time"};
+
+static cvar_t net_ack_twice = {CF_CLIENT, "net_ack_twice", "1", "the client sends each acknowledgement of the server's reliable data twice (Godnotic): a stock server resends an unacknowledged fragment only after a fixed second, so a lost ACK stalls its reliable messages (kill feed, chat, vote, a map's stufftext) as much as a lost fragment; 0 = once, as stock"};
+
 #define TN_MAXWINDOW 64     // fragments in flight, and the receiver's reorder slots
 #define TN_RING 160         // fragments queued to send (sent or not): 160 KB
 #define TN_READYMAX (NET_MAXMESSAGE + (TN_MAXWINDOW + 2) * MAX_PACKETFRAGMENT)
@@ -1001,6 +1005,8 @@ static cvar_t net_reconnect = {CF_CLIENT | CF_ARCHIVE, "net_reconnect", "1", "jo
 static cvar_t net_reconnect_tries = {CF_CLIENT | CF_ARCHIVE, "net_reconnect_tries", "5", "automatic reconnect attempts, 1 s, 2 s, 4 s ... apart"};
 static cvar_t net_reconnect_silence = {CF_CLIENT | CF_ARCHIVE, "net_reconnect_silence", "60", "seconds without a packet from the server before reconnecting (minimum 60); 0 = only the stock timeout"};
 static cvar_t net_reconnect_state = {CF_CLIENT | CF_READONLY, "_net_reconnect_state", "", "empty, or what the automatic reconnect is doing or why it gave up (for the UI)"};
+static cvar_t net_reconnect_server = {CF_CLIENT | CF_ARCHIVE, "net_reconnect_server", "1", "join again, once every 120 s, when the server drops the player mid-match with only \"Server disconnected\" (a timeout on its side after a stall, a flapping Wi-Fi, a map change that took too long); a drop that names a reason, or a drop in the first net_reconnect_server_min seconds, is not joined again (Godnotic)"};
+static cvar_t net_reconnect_server_min = {CF_CLIENT | CF_ARCHIVE, "net_reconnect_server_min", "20", "seconds in the game before a plain \"Server disconnected\" counts as a drop to join again"};
 static cvar_t net_away_spectate = {CF_CLIENT | CF_ARCHIVE, "net_away_spectate", "20", "seconds in the background in a match before going to the spectators (back into the game on return); 0 = stay a player"};
 static cvar_t net_away_limit = {CF_CLIENT | CF_ARCHIVE, "net_away_limit", "600", "seconds connected in the background before disconnecting cleanly; 0 = no limit"};
 
@@ -1023,6 +1029,13 @@ static struct
 	double away_since;
 	qbool spectated;      // moved to the spectators for being away (joins again on return)
 	qbool in_game;        // was at signon 4 last frame
+	double joined_at;     // realtime this stretch in the game began (a map change does not end it)
+	double out_at;        // realtime the game was last left (signon below 4, or not connected)
+	double sd_last;       // realtime of the last rejoin after a "Server disconnected" in the game
+	double last_ping;     // the latest ping the scoreboard showed, ms
+	double stat_next;     // the next NETSTAT line
+	double stat_gap;      // the longest silence from the server since the last one
+	double stat_frame;    // the longest frame since the last one
 	double spectate_next; // the next spectate request while away is not before this
 	int spectate_tries;   // spectate requests in a row that left us playing
 }
@@ -1045,6 +1058,15 @@ void TouchNet_Disconnecting(qbool kicked, const char *reason)
 	if (!LHNETADDRESS_ToString(&cls.netcon->peeraddress, addr, sizeof(addr), true))
 		return;
 	tn_rc.spectated = false;
+	if (kicked && reason)
+	{
+		// what the owner's next report needs: why, after how long, and what the link looked like
+		double ingame = tn_rc.in_game && tn_rc.joined_at > 0 ? host.realtime - tn_rc.joined_at : 0;
+		Con_Printf("NETDROP: \"%s\" from %s after %.0f s in the game; last packet %.1f s ago, last frame %.1f s ago, ping %.0f ms, lost %d, away %d, signon %d\n",
+			reason, addr, ingame, cls.netcon ? host.realtime - cls.netcon->lastMessageTime : -1.0,
+			tn_rc.last_frame > 0 ? Sys_DirtyTime() - tn_rc.last_frame : -1.0, tn_rc.last_ping,
+			cls.netcon ? (int)cls.netcon->droppedDatagrams : 0, tn_rc.away ? 1 : 0, cls.signon);
+	}
 	if (kicked && TouchLAN_HostEnded())
 	{
 		// the host of a LAN game left or quit: nothing to join again
@@ -1060,6 +1082,19 @@ void TouchNet_Disconnecting(qbool kicked, const char *reason)
 	if (kicked && reason && (!strncmp(reason, "Connection timed out", 20) || !strncmp(reason, "Lost connection", 15)
 		|| (!strcmp(reason, "Server disconnected") && tn_rc.last_frame > 0 && (Sys_DirtyTime() - tn_rc.last_frame > 5 || Sys_DirtyTime() < tn_rc.quick_until)))
 	 && net_reconnect.integer && !tn_rc.user)
+		goto rejoin;
+	// the server dropped a player who had been playing for a while and gave no
+	// reason: the usual end of a stall, a flapping link or a slow map load on
+	// the server's side. Join again once; a second drop within 2 minutes is not
+	// joined again (a kick or a ban would only repeat).
+	if (kicked && reason && !strcmp(reason, "Server disconnected") && net_reconnect.integer && net_reconnect_server.integer && !tn_rc.user
+	 && tn_rc.in_game && tn_rc.joined_at > 0 && host.realtime - tn_rc.joined_at >= net_reconnect_server_min.value
+	 && (tn_rc.sd_last == 0 || host.realtime - tn_rc.sd_last > 120) && !tn_rc.away)
+	{
+		tn_rc.sd_last = host.realtime;
+		tn_rc.tries = 0;
+		Con_Printf("NETDROP: the server dropped the player without a reason: joining again once\n");
+	rejoin:
 	{
 		if (strcmp(tn_rc.addr, addr))
 			tn_rc.tries = 0;
@@ -1085,11 +1120,14 @@ void TouchNet_Disconnecting(qbool kicked, const char *reason)
 		TN_SetState(line);
 		return;
 	}
+	}
 	tn_rc.next = 0;
 	tn_rc.tries = 0;
 	if (kicked && reason)
 	{
-		dpsnprintf(line, sizeof(line), "Disconnected by %s: %s", TouchJoinName_Label(addr, label, sizeof(label)), reason);
+		dpsnprintf(line, sizeof(line), "Disconnected by %s: %s (%s%.0f s in the game, last packet %.1f s ago)", TouchJoinName_Label(addr, label, sizeof(label)), reason,
+			tn_rc.away ? "in the background, " : "", tn_rc.in_game && tn_rc.joined_at > 0 ? host.realtime - tn_rc.joined_at : 0.0,
+			cls.netcon ? host.realtime - cls.netcon->lastMessageTime : -1.0);
 		TN_SetState(line);
 	}
 }
@@ -1186,13 +1224,21 @@ static void TN_StayConnected(void)
 		// player is checked again at once (TN_Playing); the time away
 		// counts from when the app left, not from this join.
 		tn_rc.in_game = true;
+		if (tn_rc.joined_at <= 0 || now - tn_rc.out_at > 30)
+			tn_rc.joined_at = now; // a map change (a few seconds out) does not restart the count
 		tn_rc.spectate_next = 0;
 		tn_rc.spectate_tries = 0;
 		if (tn_rc.away)
 			Con_Printf("In the game again while away (%.0f s so far)\n", now - tn_rc.away_since);
 	}
 	else if (!remote || cls.signon < SIGNONS)
+	{
+		if (tn_rc.in_game)
+			tn_rc.out_at = now;
 		tn_rc.in_game = false;
+	}
+	if (remote && cls.signon == SIGNONS && tn_rc.in_game && cl.realplayerentity >= 1 && cl.realplayerentity <= cl.maxclients && cl.scores)
+		tn_rc.last_ping = cl.scores[cl.realplayerentity - 1].qw_ping;
 	if (remote && cls.signon == SIGNONS)
 	{
 		// in: forget the attempts
@@ -1225,6 +1271,16 @@ static void TN_StayConnected(void)
 		// silence as of this frame's start: the packets this frame read are
 		// counted, however long the frame itself took
 		silence = now - cls.netcon->lastMessageTime;
+		// a line every 30 s for the logcat: the next "Server disconnected" report says what led up to it
+		tn_rc.stat_gap = max(tn_rc.stat_gap, silence);
+		tn_rc.stat_frame = max(tn_rc.stat_frame, gap);
+		if (now >= tn_rc.stat_next)
+		{
+			if (tn_rc.stat_next > 0)
+				Con_Printf("NETSTAT: ping %.0f ms, longest silence %.2f s, longest frame %.2f s, datagrams dropped %d\n", tn_rc.last_ping, tn_rc.stat_gap, tn_rc.stat_frame, (int)cls.netcon->droppedDatagrams);
+			tn_rc.stat_next = now + 30;
+			tn_rc.stat_gap = tn_rc.stat_frame = 0;
+		}
 		if (net_reconnect.integer && tn_rc.joinip[0] && strcmp(tn_rc.localip, tn_rc.joinip) && silence > TN_MOVED_SILENCE)
 		{
 			CL_DisconnectEx(true, "Lost connection to server (this device's address changed, nothing from it for %.0f s)", silence);
@@ -1512,6 +1568,10 @@ void TouchNet_Init(void)
 	Cvar_RegisterVariable(&net_reliable_window);
 	Cvar_RegisterVariable(&net_reliable_rto_min);
 	Cvar_RegisterVariable(&net_reliable_rto_max);
+	Cvar_RegisterVariable(&net_connect_retry);
+	Cvar_RegisterVariable(&net_ack_twice);
+	Cvar_RegisterVariable(&net_reconnect_server);
+	Cvar_RegisterVariable(&net_reconnect_server_min);
 	Cvar_RegisterVariable(&net_signon_fast);
 	Cvar_RegisterVariable(&touch_net_trace);
 	Cvar_RegisterVariable(&net_mtu);
@@ -1527,4 +1587,47 @@ void TouchNet_Init(void)
 	Cmd_AddCommand(CF_CLIENT, "touch_away", TouchNet_Away_f, "1: the game is in the background (as on Android), 0: back (for tests on desktop)");
 	TouchCurl_Init();
 	Cmd_AddCommand(CF_SHARED, "net_reliable_status", TouchNet_Status_f, "windowed reliable connections: window, round trip, retransmits (Godnotic)");
+}
+
+/*
+A join starts with getchallenge, challenge, connect, accept: four packets on a
+path that loses some. Stock DarkPlaces repeats the whole request once a second,
+so one lost packet costs a full second of staring at "Connect: sending initial
+request" (3 s for three losses). The repeat of a getchallenge is harmless (the
+server answers each with a fresh challenge; a connect that arrives after the
+accept is the duplicate it already handles), so the first two repeats come
+sooner. touch_joinfail.c's flood back-off still wins when a server answers the
+challenge four times and never accepts. Called after NetConn_ClientFrame sets
+the next send time.
+*/
+void TouchNet_ConnectPace(void)
+{
+	static int sent;
+	double first = net_connect_retry.value, delay;
+	if (cls.connect_remainingtries >= 9)
+		sent = 0; // the first send of a join (cl_main.c starts it with 10 tries)
+	if (first <= 0 || sent > 1)
+	{
+		sent++;
+		return;
+	}
+	delay = sent == 0 ? first : 2 * first;
+	sent++;
+	if (delay < 1)
+		cls.connect_nextsendtime = host.realtime + delay;
+}
+
+// netconn.c, after an ACK went out: the same ACK again. A server that resends
+// the fragment because the first ACK was lost has already lost a second; a
+// stock server's reliable messages queue up behind that second (and overflow
+// at 64 KB: "Buffer overflow in net message" drops the player). The duplicate
+// is 8 bytes; the sender ignores an ACK it has already had. Client only: a
+// server's reliable data to a client is what the stock sender sends, and the
+// windowed channel acknowledges cumulatively on its own.
+static qbool sendme_ok(const void *p) { return p != NULL; }
+void TouchNet_AckAgain(struct netconn_s *conn, const void *packet, size_t length)
+{
+	if (!sendme_ok(packet) || !net_ack_twice.integer || cls.state != ca_connected || conn != cls.netcon || sv.active)
+		return;
+	NetConn_Write(conn->mysocket, packet, (int)length, &conn->peeraddress);
 }
