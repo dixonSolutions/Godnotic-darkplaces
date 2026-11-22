@@ -2712,7 +2712,27 @@ static qbool VID_InitModeGL(const viddef_mode_t *mode)
 #ifdef __ANDROID__
 	TouchAndroid_Orientation(); // Touch: apply the saved orientation before creating the window
 #endif
-	window = SDL_CreateWindow(gamename, vid.xPos, vid.yPos, mode->width, mode->height, windowflags);
+#if !defined(DP_MOBILETOUCH) && !defined(__EMSCRIPTEN__)
+	{
+		// Godnotic: as the desktop app's back end (-uibridge) the window opens hidden: the
+		// app shows its own until a match starts (touch_uib_stream.c window_policy), so
+		// nothing flashes at start-up. A fullscreen window is made desktop-sized up front,
+		// so a compositor that drops the fullscreen state across hide/show still shows it
+		// edge to edge rather than at vid_width x vid_height with black margins.
+		int cw = mode->width, ch = mode->height;
+		SDL_DisplayMode dm;
+		if (Sys_CheckParm("-uibridge"))
+			windowflags = (windowflags & ~SDL_WINDOW_SHOWN) | SDL_WINDOW_HIDDEN;
+		if (mode->fullscreen && SDL_GetDesktopDisplayMode(vid.mode.display, &dm) == 0 && dm.w > 0 && dm.h > 0)
+		{
+			cw = dm.w;
+			ch = dm.h;
+		}
+		window = SDL_CreateWindow("Godnotic", vid.xPos, vid.yPos, cw, ch, windowflags);
+	}
+#else
+	window = SDL_CreateWindow("Godnotic", vid.xPos, vid.yPos, mode->width, mode->height, windowflags);
+#endif
 	if (window == NULL)
 	{
 		Con_Printf(CON_ERROR "Failed to set video mode to %ix%i: %s\n", mode->width, mode->height, SDL_GetError());

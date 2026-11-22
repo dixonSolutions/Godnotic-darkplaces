@@ -227,10 +227,12 @@ void VM_uib_param(prvm_prog_t *prog)
 	UIBSrc_Param(PRVM_G_STRING(OFS_PARM0), PRVM_G_STRING(OFS_PARM1), PRVM_G_STRING(OFS_PARM2));
 }
 
-// float uib_native(): 1 while a native renderer shows the descriptions (the menu then does not draw)
+// float uib_native(): 2 as the desktop app's back end (the app shows the menus, the engine
+// draws the in-match ones while the app's window hides), 1 while a native renderer
+// shows the descriptions (the menu then does not draw), 0 otherwise
 void VM_uib_native(prvm_prog_t *prog)
 {
-	PRVM_G_FLOAT(OFS_RETURN) = TouchUIB_NativeAttached() ? 1 : UIBStream_BackendMode() ? 2 : 0;
+	PRVM_G_FLOAT(OFS_RETURN) = UIBStream_BackendMode() ? 2 : TouchUIB_NativeAttached() ? 1 : 0;
 }
 
 void VM_uib_reset(prvm_prog_t *prog) { UIBS_Reset(); }

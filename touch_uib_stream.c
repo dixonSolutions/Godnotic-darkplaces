@@ -46,6 +46,7 @@ static struct
 	double lost_at;         // listen: when the last client left
 	int ever_connected;
 	int window_hidden;
+	double hide_at;          // when the window hides after a match ends (0 = not pending)
 	double start_time;
 	int first_hello_logged;
 } sm = {0, -1, -1, -1};
@@ -244,6 +245,7 @@ void UIBStream_Init(void)
 		return;
 	const char *spec = i + 1 < sys.argc ? sys.argv[i + 1] : "listen";
 	sm.start_time = Sys_DirtyTime();
+	sm.window_hidden = 1; // vid_sdl.c opens the window hidden under -uibridge
 #ifdef UIB_STREAM
 	if (!strncmp(spec, "fd:", 3))
 	{
@@ -297,9 +299,27 @@ static void window_policy(void)
 	uibnode_t *app = UIBS_Find("app");
 	size_t l;
 	const char *ctx = app ? UIBS_PropJSON(app, "context", &l) : NULL;
-	int want_hidden = sm.conn && (!ctx || strncmp(ctx, "\"game\"", 6));
+	// hidden whenever no match is on, connected or not yet: the window opens hidden
+	// (vid_sdl.c) and the engine quits once the front end is gone, so it never
+	// lingers unseen
+	int want_hidden = !ctx || strncmp(ctx, "\"game\"", 6);
 	if (want_hidden == sm.window_hidden)
+	{
+		sm.hide_at = 0;
 		return;
+	}
+	// a match ending hides the window a moment later: the app's window (back after
+	// 120 ms, backend.rs context_changed) comes up over it first, so the screen is
+	// never empty, and a quick game -> loading -> game hop does not flash at all
+	if (want_hidden && sm.ever_connected)
+	{
+		double now = Sys_DirtyTime();
+		if (!sm.hide_at)
+			sm.hide_at = now + 0.3;
+		if (now < sm.hide_at)
+			return;
+	}
+	sm.hide_at = 0;
 	SDL_Window *w = SDL_GL_GetCurrentWindow();
 	if (!w)
 		return;
@@ -307,6 +327,15 @@ static void window_policy(void)
 		SDL_HideWindow(w);
 	else
 	{
+		// SDL_ShowWindow re-applies fullscreen; the windowed size is the desktop's
+		// too, so a compositor that forgets the state of a window it unmapped still
+		// shows it edge to edge (no black margins)
+		if (SDL_GetWindowFlags(w) & SDL_WINDOW_FULLSCREEN_DESKTOP)
+		{
+			SDL_DisplayMode dm;
+			if (SDL_GetDesktopDisplayMode(SDL_GetWindowDisplayIndex(w), &dm) == 0)
+				SDL_SetWindowSize(w, dm.w, dm.h);
+		}
 		SDL_ShowWindow(w);
 		SDL_RaiseWindow(w);
 	}
