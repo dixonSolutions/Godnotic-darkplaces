@@ -59,6 +59,8 @@ static char jp_localmap[MAX_QPATH]; // the map a local game is starting (SV_Spaw
 #define JP_STICKY 3.0            // seconds a followed player is kept without activity
 #define JP_MOVE_EPS2 (2.0f * 2.0f)
 
+static qbool JP_HavePicture(void);
+
 void TouchJoinPreview_Init(void)
 {
 	Cvar_RegisterVariable(&touch_join_preview);
@@ -99,6 +101,9 @@ qbool TouchJoinPreview_Active(void)
 		cl.worldmodel->num_surfaces, cl.worldmodel->data_surfaces != NULL), jp_newmap))
 		return false;
 	if (key_consoleactive & KEY_CONSOLEACTIVE_FORCED)
+		return false;
+	// Touch: the map's picture stays until the game is loaded; the world shows only without one
+	if (!TouchJoinPreview_ShowsWorld(1, JP_HavePicture()))
 		return false;
 	return true;
 }
@@ -238,9 +243,17 @@ int TouchJoinPreview_Picture(char *name, int size)
 	return choice;
 }
 
-// The picture is drawn from the moment a join starts until the world is
-// there: the player sees the map they are joining (or a dim backdrop), not a
-// logo, for the part of the join that loads the rest of the signon.
+// A picture of the map being joined exists (in this install, or range-read
+// from its pack).
+static qbool JP_HavePicture(void)
+{
+	char path[MAX_QPATH];
+	return TouchJoinPreview_Picture(path, sizeof(path)) != TJP_PIC_NONE;
+}
+
+// The picture is drawn from the moment a join starts until the game is loaded:
+// the player sees the map they are joining, not a logo or the bare world model,
+// for the whole signon.
 qbool TouchJoinPreview_Waiting(void)
 {
 	qbool drawable = false;
@@ -258,7 +271,7 @@ qbool TouchJoinPreview_Waiting(void)
 	if (cl.worldmodel && !(local && (cls.state != ca_connected || cls.signon >= SIGNONS))) // a new local map: the old world is not it
 		drawable = TouchJoinPreview_Allowed(TouchJoinPreview_Drawable(1, cl.worldmodel->brush.num_leafs, cl.worldmodel->brush.data_leafs != NULL,
 			cl.worldmodel->num_surfaces, cl.worldmodel->data_surfaces != NULL), jp_newmap) != 0; // inside a newmap the picture stays
-	return TouchJoinPreview_ShowsPicture(1, 1, drawable) != 0;
+	return TouchJoinPreview_ShowsPicture(1, 1, drawable, JP_HavePicture()) != 0;
 }
 
 qbool TouchJoinPreview_DrawLevelshot(void)

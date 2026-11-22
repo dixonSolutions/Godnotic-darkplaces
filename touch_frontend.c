@@ -459,8 +459,8 @@ static void publish_connect(qbool force)
 		stage = "preview"; // Touch: the world (or its levelshot) is what shows, the load is a bar (touch_joinpreview.c)
 	else if (cls.state == ca_connected && cls.signon < SIGNONS)
 		stage = n > 0 ? "downloading" : (scr_loading ? "loading" : "signon");
-	else if (scr_loading)
-		stage = "loading";
+	else if (scr_loading && TouchJoinPreview_LocalLoading())
+		stage = "loading"; // Touch: a local map load; the boot plaque and an r_restart are not one (no card at start-up)
 	(void)bytes;
 	jb_raw(&b, "{");
 	jb_kstr(&b, "stage", stage);

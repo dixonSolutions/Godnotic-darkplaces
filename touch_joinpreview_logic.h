@@ -28,13 +28,21 @@ static inline int TouchJoinPreview_ShowsLevelshot(int preview_on, int joining, i
 	return preview_on && joining && map_known && !drawable;
 }
 
-/* A server join always has a picture behind it, never the logo screen: the map's
- * own picture if this install has it, else the one the server list's map name
- * finds, else a dimmed generic map picture. The world replaces it when drawable.
+/* The map's picture, once there is one, stays behind the join until the game is
+ * loaded (the signon is over): a world drawn before then is the bare world model
+ * with no players or map objects, which looked broken next to the picture. Only
+ * a join with no picture (no map name yet, no levelshot anywhere) shows the
+ * world as soon as it is drawable.
  * Unlike TouchJoinPreview_ShowsLevelshot this does not need the map name. */
-static inline int TouchJoinPreview_ShowsPicture(int preview_on, int joining, int drawable)
+static inline int TouchJoinPreview_ShowsPicture(int preview_on, int joining, int drawable, int have_picture)
 {
-	return preview_on && joining && !drawable;
+	return preview_on && joining && (have_picture || !drawable);
+}
+
+/* The live world preview: a drawable world, and no picture to keep up instead. */
+static inline int TouchJoinPreview_ShowsWorld(int drawable, int have_picture)
+{
+	return drawable && !have_picture;
 }
 
 #define TJP_PIC_NONE 0
