@@ -1034,7 +1034,8 @@ static int TouchUI_LayoutHeader(float x, float y, float w, float h,
 	float bw, bx;
 	qbool keys = TouchUI_KeysShown(kind);
 	qbool toggle = kind != TOUCHUI_SHEET_PREVIEW && kind != TOUCHUI_SHEET_CHAT;
-	int slots = ((kind == TOUCHUI_SHEET_CHAT) ? 2 : (keys ? 5 : 4)) + (toggle ? 1 : 0);
+	qbool clear = kind == TOUCHUI_SHEET_CONSOLE; /* CLEAR runs the stock clear command */
+	int slots = ((kind == TOUCHUI_SHEET_CHAT) ? 2 : (keys ? 5 : 4)) + (toggle ? 1 : 0) + (clear ? 1 : 0);
 	const char *close_lab = (kind == TOUCHUI_SHEET_CHAT) ? "CLOSE CHAT" : "CLOSE";
 
 	bw = (w - gap * (float)(slots + 1)) / (float)slots;
@@ -1061,6 +1062,12 @@ static int TouchUI_LayoutHeader(float x, float y, float w, float h,
 		TouchUI_PushItem(out, &n, maxout, bx, y + gap, bw, h - gap * 2.0f,
 			"PGDN", th, TOUCHUI_STYLE_DIM, TOUCHUI_ACT_KEY, K_PGDN);
 		bx += bw + gap;
+		if (clear)
+		{
+			TouchUI_PushItem(out, &n, maxout, bx, y + gap, bw, h - gap * 2.0f,
+				"CLEAR", th, TOUCHUI_STYLE_DIM, TOUCHUI_ACT_CLEAR, 0);
+			bx += bw + gap;
+		}
 	}
 	else
 	{
@@ -1301,6 +1308,9 @@ static int TouchUI_LayoutMouseSheet(touchui_sheet_t kind, float x, float y, floa
 	by = bound(y, by, y + h - bh);
 	TouchUI_PushItem(out, &n, maxout, x + w - bw - 8.0f, by, bw, bh,
 		keys ? "HIDE KEYS" : "KEYBOARD", bh * 0.42f, TOUCHUI_STYLE_GLASS, TOUCHUI_ACT_KB_TOGGLE, 0);
+	if (kind == TOUCHUI_SHEET_CONSOLE) /* CLEAR beside it: the stock clear command */
+		TouchUI_PushItem(out, &n, maxout, x + w - bw - 8.0f - bw * 0.6f - 6.0f, by, bw * 0.6f, bh,
+			"CLEAR", bh * 0.42f, TOUCHUI_STYLE_GLASS, TOUCHUI_ACT_CLEAR, 0);
 	return TouchUI_LayoutPopup(out, maxout, n);
 }
 
@@ -1453,6 +1463,9 @@ static void TouchUI_FireAction(const touchui_item_t *it, double realtime)
 		break;
 	case TOUCHUI_ACT_TAB_KEYS:
 		touchui_tab = TOUCHUI_TAB_KEYS;
+		break;
+	case TOUCHUI_ACT_CLEAR:
+		Cbuf_AddText(cmd_local, "clear\n"); /* the stock console command: empties the scrollback */
 		break;
 	case TOUCHUI_ACT_DONE:
 		touchui_menu_dismissed = true;

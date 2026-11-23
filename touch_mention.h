@@ -24,6 +24,11 @@ void TouchChatLog_Lead(char lead);
 void TouchChatLog_Line(const char *line);
 /* console.c: how long a chat line stays in the feed (the stock con_chattime unless the log is on). */
 float TouchChatLog_Fade(float stock);
+/* console.c: the same for the notify area, so a cleared log leaves no stock line behind. */
+float TouchChatLog_NotifyFade(float stock);
+struct cvar_s;
+void TouchChatLog_NotifyBegin(struct cvar_s *notifytime);
+void TouchChatLog_NotifyEnd(struct cvar_s *notifytime);
 /* keys.c, Key_Event in the game: wheel and pointer over the log box. True when taken. */
 qbool TouchChatLog_Key(int key, qbool down);
 /* Draws the scrolled-back view and the export icon; x, y, w, h is the chat area. */

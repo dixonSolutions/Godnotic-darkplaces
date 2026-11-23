@@ -64,6 +64,45 @@ static inline int TouchChatLog_Add(tcl_log_t *l, double now, time_t wall, const 
 	return 1;
 }
 
+// Empty the log: no line survives, so nothing can come back through Get,
+// Visible or Export, and the ring starts over.
+static inline void TouchChatLog_Clear(tcl_log_t *l)
+{
+	l->head = 0;
+	l->count = 0;
+}
+
+// How long a stock chat or notify line may stay on screen once the log was
+// cleared at engine time cleared_at (<0: never cleared): only lines newer than
+// the clear. The stock chat box shows a line when its age is within the window,
+// and a window of 0 means "no limit", so this never returns 0. A clear stamped
+// in the future (the clock restarted on a new map) no longer applies.
+static inline float TouchChatLog_FadeAfterClear(float stock, double now, double cleared_at)
+{
+	float w;
+	if (cleared_at < 0 || cleared_at > now)
+		return stock;
+	w = (float)(now - cleared_at) - 0.001f; // a line stamped at the clear is older than the window
+	if (w < 0.0001f)
+		w = 0.0001f;
+	return (stock > 0 && stock < w) ? stock : w;
+}
+
+// The icons beside the box, in a row ending at the box's right edge, all the
+// same size with a gap of icon_size * 0.4 between neighbours. Slot 0 is the
+// right-most (share), then download, copy, clear going left.
+#define TCL_ICONS 4
+static inline float TouchChatLog_IconX(float x, float w, float icon_size, int slot)
+{
+	return x + w - icon_size - (float)slot * icon_size * 1.4f;
+}
+
+// Is the point inside the square icon at ix, iy of side s?
+static inline int TouchChatLog_InIcon(float px, float py, float ix, float iy, float s)
+{
+	return px >= ix && px <= ix + s && py >= iy && py <= iy + s;
+}
+
 // 0 is the oldest line held.
 static inline const tcl_entry_t *TouchChatLog_Get(const tcl_log_t *l, unsigned i)
 {

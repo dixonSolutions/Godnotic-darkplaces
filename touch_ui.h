@@ -50,6 +50,7 @@ typedef enum touchui_action_e
 	TOUCHUI_ACT_SPECTATE,      /* action_arg = spectator entry index; runs it and closes the sheet */
 	TOUCHUI_ACT_KB_TOGGLE,     /* show / hide the on-screen keys */
 	TOUCHUI_ACT_POPUP,         /* hold popup cell; picked by sliding, not by a tap */
+	TOUCHUI_ACT_CLEAR,         /* console: run the stock clear command (empties the scrollback) */
 	TOUCHUI_ACT_DONE           /* menu keys: put them away, the field keeps its text and focus */
 }
 touchui_action_t;
