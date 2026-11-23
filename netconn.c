@@ -21,6 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 #include "quakedef.h"
+#include "touch_mention.h" // Touch: chat @ list roster
 #include "thread.h"
 #include "lhnet.h"
 
@@ -2200,6 +2201,8 @@ static int NetConn_ClientParsePacket(lhnetsocket_t *mysocket, unsigned char *dat
 				}
 			}
 		}
+		if (TouchMention_StatusPacket(string, length)) // Touch: who is on this server, for the chat @ list
+			return true;
 		if (length >= 10 && !memcmp(string, "challenge ", 10) && cls.connect_trying)
 		{
 			// darkplaces or quake3

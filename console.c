@@ -1698,6 +1698,8 @@ static void Con_DrawInput(qbool is_console, float x, float v, float inputsize)
 
 	if (is_console && !key_consoleactive)
 		return;		// don't draw anything
+	if (!is_console)
+		TouchMention_NoteInput(x, v, inputsize); // Touch: the chat @ list goes under this line
 
 	if (is_console)
 	{

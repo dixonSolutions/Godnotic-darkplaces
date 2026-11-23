@@ -50,6 +50,8 @@ void TouchChatLog_Line(const char *line)
 {
 	if (!tcl_pending_lead)
 		return;
+	if (tcl_pending_lead == 1)
+		TouchMention_NoteChat(line);
 	tcl_pending_lead = 0;
 	if (!touch_chatlog.integer)
 		return;

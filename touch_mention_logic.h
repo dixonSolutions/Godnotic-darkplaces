@@ -196,4 +196,32 @@ static inline void TouchMention_TypingText(const char *const *names, int count,
 	}
 }
 
+// The speaker of a printed chat line ("name^7: text" or team chat "(team) name: text"),
+// colour codes stripped. 1 and the name in out, or 0 when the line has no speaker.
+static inline int TouchMention_ChatName(const char *line, char *out, size_t size)
+{
+	char plain[256];
+	const char *start, *colon;
+	size_t l;
+	TouchMention_StripColors(line, plain, sizeof(plain));
+	start = plain;
+	while (*start && (unsigned char)*start < 32)
+		start++;
+	if (*start == '(')
+	{
+		const char *close = strstr(start, ") ");
+		if (close)
+			start = close + 2;
+	}
+	colon = strstr(start, ": ");
+	if (!colon || colon == start)
+		return 0;
+	l = (size_t)(colon - start);
+	if (l >= size || l > 40)
+		return 0;
+	memcpy(out, start, l);
+	out[l] = 0;
+	return 1;
+}
+
 #endif
