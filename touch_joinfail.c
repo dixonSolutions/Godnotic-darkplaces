@@ -38,6 +38,7 @@ static cvar_t join_fail_kind = {CF_CLIENT | CF_READONLY, "_join_fail_kind", "", 
 static cvar_t join_fail_text = {CF_CLIENT | CF_READONLY, "_join_fail_text", "", "Godnotic: the last failed join in one sentence"};
 static cvar_t join_fail_detail = {CF_CLIENT | CF_READONLY, "_join_fail_detail", "", "Godnotic: the server's own words for the last failed join, or what to do about it"};
 static cvar_t join_fail_address = {CF_CLIENT | CF_READONLY, "_join_fail_address", "", "Godnotic: the address of the last failed join (join_retry connects to it again)"};
+static cvar_t touch_rcon_denied = {CF_CLIENT | CF_READONLY, "_touch_rcon_denied", "0", "Godnotic: counts the rcon commands a server refused (wrong password, or rcon is off there)"};
 static cvar_t touch_joinfail_dialog = {CF_CLIENT, "touch_joinfail_dialog", "1", "Godnotic: open the menu's Could not join dialog when a join fails (a native front end that shows its own sets 0)"};
 static cvar_t net_connect_backoff = {CF_CLIENT | CF_ARCHIVE, "net_connect_backoff", "1", "Godnotic: when a server answers the challenge but ignores the connect four times, wait out its 5 second connect flood block once instead of renewing it every second"};
 
@@ -230,7 +231,20 @@ void TouchJoinFail_Init(void)
 	Cvar_RegisterVariable(&join_fail_detail);
 	Cvar_RegisterVariable(&join_fail_address);
 	Cvar_RegisterVariable(&touch_joinfail_dialog);
+	Cvar_RegisterVariable(&touch_rcon_denied);
 	Cvar_RegisterVariable(&net_connect_backoff);
 	TouchJoinName_Init();
 	Cmd_AddCommand(CF_CLIENT, "join_retry", TouchJoinFail_Retry_f, "Godnotic: join the server of the last failed join again (_join_fail_address)");
+}
+
+// A server's print to this client (netconn.c's "n" packet, which is also how an
+// rcon command's output comes back). A server that does not accept the rcon
+// password, or has none, says so in one line: the menu's Server control reads
+// _touch_rcon_denied to tell the player. Never the password itself.
+void TouchRcon_Reply(const char *text)
+{
+	if (!text)
+		return;
+	if (strstr(text, "denied rcon access"))
+		Cvar_SetValueQuick(&touch_rcon_denied, touch_rcon_denied.integer + 1);
 }

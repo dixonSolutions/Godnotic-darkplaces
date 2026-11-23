@@ -15,4 +15,7 @@ void TouchJoinFail_CloseStaleMenu(qbool trying);
 // a join is being attempted or is in its signon: the server list stays quiet
 qbool TouchJoinFail_Joining(void);
 
+// a server's print (netconn.c, "n" packet): counts _touch_rcon_denied
+void TouchRcon_Reply(const char *text);
+
 #endif

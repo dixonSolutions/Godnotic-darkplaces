@@ -31,6 +31,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "touch_lan.h" // Touch: LAN games
 #include "touch_net.h" // Touch: windowed reliable channel, fast signon
 #include "touch_srvlist.h" // Touch: the fast server list
+#include "touch_joinfail.h" // Touch: TouchRcon_Reply
 #include "touch_joinname.h" // Touch: the joined server's name
 #include "touch_netkeep.h" // Touch: the connection outlives a long frame
 #include <time.h>
@@ -2461,6 +2462,7 @@ static int NetConn_ClientParsePacket(lhnetsocket_t *mysocket, unsigned char *dat
 				return true;
 			}
 			Con_Printf("QW print command from server at %s:\n%s\n", addressstring2, string + 1);
+			TouchRcon_Reply(string + 1); // Touch: rcon denied?
 		}
 		// we may not have liked the packet, but it was a command packet, so
 		// we're done processing this packet now
