@@ -5,6 +5,7 @@ docs/UI_BRIDGE.md is the contract; touch_uib_store.c holds the tree.
 #include "quakedef.h"
 #include "thread.h"
 #include "touch_uib_int.h"
+#include "touch_playermodel.h" // Touch: player model import
 #include "touch_shellbtn.h"
 #include "touch_display.h"
 #ifdef __linux__
@@ -1635,6 +1636,7 @@ void TouchUIB_Init(void)
 	Cvar_RegisterVariable(&touch_loading_card);
 	Cvar_RegisterVariable(&touch_chat_system_lines);
 	Cvar_RegisterVariable(&uib_version);
+	TouchPM_Init();
 	Cvar_RegisterVariable(&uib_debug);
 	Cmd_AddCommand(CF_CLIENT, "uib_dump", UIB_Dump_f, "UI bridge: write the current snapshot to the console or a file (uib_dump <file>)");
 	Cmd_AddCommand(CF_CLIENT, "uib_send", UIB_Send_f, "UI bridge: deliver a renderer message (JSON) on the console loopback and print the replies");

@@ -462,7 +462,18 @@ static void publish_connect(qbool force)
 	else if (scr_loading && TouchJoinPreview_LocalLoading())
 		stage = "loading"; // Touch: a local map load; the boot plaque and an r_restart are not one (no card at start-up)
 	(void)bytes;
-	jb_raw(&b, "{");
+	// The server is still sending its serverinfo and precache lists (signon 0 -> 1): nothing is loading and
+	// nothing is downloading, the client waits one round trip per fragment (a stock server). Say so, and for how long.
+	{
+		static double wait_since;
+		qbool waiting = cls.state == ca_connected && cls.signon == 0 && n == 0 && !cls.connect_trying;
+		if (!waiting)
+			wait_since = 0;
+		else if (!wait_since)
+			wait_since = Sys_DirtyTime();
+		jb_raw(&b, "{");
+		jb_kint(&b, "wait_s", waiting ? (int)(Sys_DirtyTime() - wait_since) : -1); // whole seconds: one change a second
+	}
 	jb_kstr(&b, "stage", stage);
 	jb_kstr(&b, "status", cl_connect_status);
 	jb_kstr(&b, "address", addr);

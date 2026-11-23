@@ -91,6 +91,7 @@ OBJ_COMMON= \
 	touch_uib_img.o \
 	touch_uib_stream.o \
 	touch_uib_mvm.o \
+	touch_playermodel.o \
 	cl_video.o \
 	cl_video_libavw.o \
 	clvm_cmds.o \

@@ -49,4 +49,5 @@ void VM_uib_qv(struct prvm_prog_s *prog);
 void VM_uib_parent(struct prvm_prog_s *prog);
 void VM_uib_loadinfo(struct prvm_prog_s *prog);
 void VM_uib_thumb(struct prvm_prog_s *prog);
+#include "touch_playermodel.h" // Touch: #1223.. player model import
 #endif
