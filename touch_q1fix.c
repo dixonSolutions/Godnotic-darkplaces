@@ -14,7 +14,7 @@ that joins before every pack is in, or whose assets pack is incomplete, ran into
   - a Quake 1 world (BSP version 29 with the wad's textures) is lit with
     Quake's own lightmaps, which are far darker than the Xonotic maps the
     brightness defaults are tuned for. Its lightmaps are scaled by
-    touch_q1_lightscale (1.5; 1 is exactly Quake).
+    touch_q1_lightscale (2.5; 1 is exactly Quake).
 
 Everything here is a hook called from an upstream file on its own line.
 */
@@ -25,11 +25,15 @@ Everything here is a hook called from an upstream file on its own line.
 
 static cvar_t touch_sbar_rowfix = {CF_CLIENT | CF_ARCHIVE, "touch_sbar_rowfix", "1",
 	"1: the engine HUD's scoreboard and number rows are drawn at font scale 1 so that neighbouring rows do not overlap; 0: stock"};
-static cvar_t touch_q1_lightscale = {CF_CLIENT | CF_ARCHIVE, "touch_q1_lightscale", "1.5",
+static cvar_t touch_q1_lightscale = {CF_CLIENT | CF_ARCHIVE, "touch_q1_lightscale", "2.5",
 	"multiplies the lightmaps of a Quake 1 world (BSP29), which are much darker than Xonotic maps; 1 is Quake's own light"};
+
+static cvar_t touch_nomodel_draw = {CF_CLIENT | CF_ARCHIVE, "touch_nomodel_draw", "0",
+	"1: an entity whose model is missing is drawn as DarkPlaces' debug marker, an octahedron with red, green and blue corners (a large one when it is the weapon in the player's hand); 0: it is not drawn"};
 
 void TouchQ1_Init(void)
 {
+	Cvar_RegisterVariable(&touch_nomodel_draw);
 	Cvar_RegisterVariable(&touch_sbar_rowfix);
 	Cvar_RegisterVariable(&touch_q1_lightscale);
 }
@@ -64,4 +68,18 @@ void TouchQ1_SbarEnd(void)
 	f->settings.scale = tq_font_scale;
 	f->maxwidth = tq_font_maxwidth;
 	tq_font_changed = false;
+}
+
+// gl_rmain.c R_DrawNoModel: DarkPlaces draws an entity whose model could not be loaded
+// (a pack that did not arrive, a model that failed to load) as a 32 unit octahedron whose
+// six corners are dark blue, green and red. Held in front of the player, as a weapon, it is
+// the large rainbow diamond. Nothing is a better picture than that.
+qbool TouchQ1_HideNoModel(void)
+{
+	static int count;
+	if (touch_nomodel_draw.integer)
+		return false;
+	if (++count == 1 || (count & 1023) == 0)
+		Con_DPrintf("Touch: entity without a model not drawn (%d so far)\n", count);
+	return true;
 }

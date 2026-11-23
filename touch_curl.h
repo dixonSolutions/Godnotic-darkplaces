@@ -854,6 +854,17 @@ static qbool TouchCurl_Ended(downloadinfo *di, int status, qbool ok, CURLcode er
 		if (changed)
 			Con_Printf("Download of %s: the file on the server changed, starting again\n", di->filename + 8);
 	}
+	if (status == 1 /* CURL_DOWNLOAD_FAILED */ && (int)error == 33 /* CURLE_RANGE_ERROR */ && !strncmp(di->filename, "dlcache/", 8))
+	{
+		// Resumed from a partial file and the server answered 200 with the whole
+		// file: it ignores Range (Python's http.server, the Quake 1 server's
+		// host). libcurl refuses to append that to the partial, so every retry
+		// from the same bytes fails the same way and the join went on without the
+		// pack. Start the file again from byte 0, which such a server can serve.
+		Con_Printf("Download of %s: the server cannot resume (it ignores Range), starting again from byte 0\n", di->filename + 8);
+		TC_Empty(di->filename);
+		TC_DropMeta(di->filename);
+	}
 	retry = di->forthismap && TouchCurl_Retry(di, status, error);
 	return retry;
 }

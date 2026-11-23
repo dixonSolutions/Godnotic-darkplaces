@@ -6310,6 +6310,7 @@ static void R_DrawNoModel_TransparentCallback(const entity_render_t *ent, const 
 void R_DrawNoModel(entity_render_t *ent)
 {
 	vec3_t org;
+	if (TouchQ1_HideNoModel()) return; // Touch: a missing model draws nothing, not the debug diamond (touch_q1fix.c)
 	Matrix4x4_OriginFromMatrix(&ent->matrix, org);
 	if ((ent->flags & RENDER_ADDITIVE) || (ent->alpha < 1))
 		R_MeshQueue_AddTransparent((ent->flags & RENDER_NODEPTHTEST) ? TRANSPARENTSORT_HUD : TRANSPARENTSORT_DISTANCE, org, R_DrawNoModel_TransparentCallback, ent, 0, rsurface.rtlight);
