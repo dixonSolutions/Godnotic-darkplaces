@@ -1668,6 +1668,7 @@ static int NetConn_ReceivedMessage(netconn_t *conn, const unsigned char *data, s
 					if( conn->receiveMessageLength + length <= (int)sizeof( conn->receiveMessage ) ) {
 						memcpy(conn->receiveMessage + conn->receiveMessageLength, data, length);
 						conn->receiveMessageLength += (int)length;
+						TouchJoinName_PeekSignon(conn == cls.netcon, conn->receiveMessage, conn->receiveMessageLength); // Touch: the signon message's pack URLs, from its first fragment
 					} else {
 						Con_Printf( "Reliable message (seq: %i) too big for message buffer!\n"
 									"Dropping the message!\n", sequence );

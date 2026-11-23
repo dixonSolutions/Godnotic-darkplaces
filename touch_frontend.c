@@ -517,6 +517,79 @@ static void publish_connect(qbool force)
 		jb_kint(&b, "dl_running", running);
 		jb_kint(&b, "dl_queued", queued);
 	}
+	// the whole join's downloads, the finished files included: "file 2 of 5", "310 of 425 MB". A file is
+	// counted from the first time it is seen (running or queued) and is done once it leaves the list.
+	{
+		static struct { char name[MAX_QPATH]; double bytes, total; qbool done; } files[48];
+		static int nfiles;
+		static qbool was_joining;
+		qbool joining = cls.connect_trying || cls.state == ca_connected;
+		double all_bytes = 0, all_total = 0;
+		int done = 0, k;
+		if (!joining || (cls.connect_trying && !was_joining))
+			nfiles = 0;
+		was_joining = joining;
+		if (joining && cls.state == ca_connected && cls.signon < SIGNONS)
+		{
+			for (k = 0; k < nfiles; k++)
+				files[k].done = true; // until seen again below
+			for (i = 0; i < n; i++)
+			{
+				for (k = 0; k < nfiles && strcmp(files[k].name, dl[i].filename); k++)
+					;
+				if (k == nfiles)
+				{
+					if (nfiles >= (int)(sizeof(files) / sizeof(files[0])))
+						continue;
+					memset(&files[nfiles], 0, sizeof(files[nfiles]));
+					dp_strlcpy(files[nfiles].name, dl[i].filename, sizeof(files[nfiles].name));
+					nfiles++;
+				}
+				files[k].done = false;
+				if (!dl[i].queued)
+				{
+					files[k].bytes = TouchNet_CurlBytes(i);
+					if (dl[i].progress > 0 && dl[i].progress <= 1)
+						files[k].total = files[k].bytes / dl[i].progress;
+				}
+			}
+		}
+		{
+			int known = 0, unknown = 0;
+			double known_sum = 0;
+			for (k = 0; k < nfiles; k++)
+			{
+				if (files[k].done)
+				{
+					done++;
+					if (files[k].total > files[k].bytes)
+						files[k].bytes = files[k].total;
+				}
+				all_bytes += files[k].bytes;
+				if (files[k].total > 0)
+				{
+					known++;
+					known_sum += files[k].total > files[k].bytes ? files[k].total : files[k].bytes;
+				}
+				else
+					unknown++;
+			}
+			all_total = known_sum;
+			// a queued file's size is not known until it starts: guess the average of the known ones, so the bar
+			// does not jump back each time the next file reports its size (the total is an estimate until then)
+			if (known && unknown)
+				all_total += known_sum / known * unknown;
+			if (all_total < all_bytes)
+				all_total = all_bytes;
+		}
+		jb_kstr(&b, "dl_file", dlindex >= 0 ? dl[dlindex].filename : "");
+		jb_kint(&b, "dl_files_done", done);
+		jb_kint(&b, "dl_files_total", nfiles);
+		jb_knum(&b, "dl_all_bytes", all_bytes);
+		jb_knum(&b, "dl_all_total", all_total);
+	}
+	// bytes of the server's signon message that have arrived (the wait before anything loads or downloads)
+	jb_kint(&b, "sig_bytes", TouchJoinName_SignonBytes());
 	jb_kstr(&b, "load", scr_loading ? fe.load_msg : "");
 	// the bar: the item's start plus the share of it done (the world model reports its parts)
 	jb_knum(&b, "load_progress", scr_loading ? fe.load_min + fe.load_len * TouchPre_SubFraction() : 0);

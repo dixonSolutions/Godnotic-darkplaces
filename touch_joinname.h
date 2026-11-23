@@ -30,6 +30,14 @@ qbool TouchJoinName_Connectionless(const char *string, int length, lhnetaddress_
 // TOUCHJOINNAME_MAXCHARS characters ending in an ellipsis
 void TouchJoinName_Clean(const char *in, char *out, size_t outsize);
 
+// the data of a reliable message from the server as far as it has arrived (netconn.c, every fragment):
+// the `curl --pak` lines at its head give the map and the pack's URL, and start the downloads
+void TouchJoinName_PeekSignon(qbool from_server, const unsigned char *data, int length);
+// the pack that holds `map`, from that first fragment: its URL and the file name it is stored under (--as; may be empty)
+qbool TouchJoinName_EarlyPack(const char *map, char *url, size_t size, char *name, size_t namesize);
+// bytes of the signon message received so far (0 outside signon 0)
+int TouchJoinName_SignonBytes(void);
+
 #define TOUCHJOINNAME_MAXCHARS 32
 
 #endif

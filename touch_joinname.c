@@ -35,6 +35,7 @@ static cvar_t touch_join_label = {CF_CLIENT | CF_READONLY, "_touch_join_label", 
 #define JN_ASK_EVERY 1.25   // seconds between them
 
 extern void TouchCurl_ClearJoinShot(void);
+extern qbool TouchCurl_ShotPending(void);
 
 static struct
 {
@@ -46,7 +47,18 @@ static struct
 	qbool replied;
 	int asks;
 	double next_ask, next_list;
+	// the first fragments of the server's signon message (TouchJoinName_PeekSignon)
+	int peek_lines;     // curl lines of it handled so far
+	qbool peek_done;
+	int sig_bytes;      // bytes of the signon message received so far
+	char early_map[MAX_QPATH]; // the map named by its first "curl --pak ... --for maps/<map>.bsp"
+	char early_url[1024];      // and the URL of the pack that holds it
+	char early_name[MAX_QPATH]; // and the file name it is stored under in dlcache/
+	char held[8][1100];        // early curl commands waiting for the picture's requests to finish (TS, touch_curlshot.h)
+	int nheld;
+	double hold_until;
 } tjn;
+static cvar_t touch_early_downloads = {CF_CLIENT | CF_ARCHIVE, "touch_early_downloads", "1", "start the packs a server asks for (its curl --pak lines) from the first fragment of its signon message, not after the whole message has arrived, so they download while a stock server's stop-and-wait transfer of the precache lists is still running (Godnotic)"};
 
 void TouchJoinName_Clean(const char *in, char *out, size_t outsize)
 {
@@ -145,7 +157,166 @@ static qbool from_list(void)
 // may have been populated before a map vote or a reconnect.
 const char *TouchJoinName_MapFor(const char *addr)
 {
+	if (addr && !strcmp(addr, tjn.address) && tjn.early_map[0])
+		return tjn.early_map; // the server's own first fragment: what it is loading now, whatever the list or getinfo said
 	return addr && !strcmp(addr, tjn.address) && tjn.replied ? tjn.map : "";
+}
+
+qbool TouchJoinName_EarlyPack(const char *map, char *url, size_t size, char *name, size_t namesize)
+{
+	if (!map || !tjn.early_map[0] || strcmp(map, tjn.early_map) || !tjn.early_url[0])
+		return false;
+	dp_strlcpy(url, tjn.early_url, size);
+	if (name && namesize)
+		dp_strlcpy(name, tjn.early_name, namesize);
+	return true;
+}
+
+int TouchJoinName_SignonBytes(void)
+{
+	return cls.state == ca_connected && cls.signon == 0 ? tjn.sig_bytes : 0;
+}
+
+// a token of a curl line the server stuffed: nothing the console would read as more than a word
+static qbool peek_token_ok(const char *t, size_t n)
+{
+	size_t i;
+	if (!n || n > 900)
+		return false;
+	for (i = 0; i < n; i++)
+	{
+		unsigned char c = (unsigned char)t[i];
+		if (!(isalnum(c) || c == '-' || c == '_' || c == '.' || c == '/' || c == ':' || c == '%' || c == '?' || c == '&' || c == '=' || c == '~' || c == '+' || c == ','))
+			return false;
+	}
+	return true;
+}
+
+// One "curl --pak [--forthismap] [--as name] [--for file ...] url" line: remember the map it names and start the
+// download now (without --forthismap: the real stufftext that follows, once the whole message is in, counts it
+// for the join; a pack already complete by then is simply there).
+static void peek_curl_line(const char *line, size_t n)
+{
+	char buf[1100], out[1100] = "curl";
+	char *tok[64], *p;
+	int nt = 0, i, forthismap = 0;
+	const char *url = NULL;
+	char bsp[MAX_QPATH] = "", as[MAX_QPATH] = "";
+	if (n >= sizeof(buf) || n < 12)
+		return;
+	memcpy(buf, line, n);
+	buf[n] = 0;
+	for (p = buf; *p; p++)
+		if ((unsigned char)*p < 32 && *p != ' ')
+			return;
+	for (p = buf; *p && nt < 64; )
+	{
+		while (*p == ' ')
+			*p++ = 0;
+		if (!*p)
+			break;
+		tok[nt++] = p;
+		while (*p && *p != ' ')
+			p++;
+	}
+	if (nt < 3 || strcmp(tok[0], "curl") || strcmp(tok[1], "--pak"))
+		return;
+	for (i = 1; i < nt; i++)
+		if (!peek_token_ok(tok[i], strlen(tok[i])) && strncmp(tok[i], "--maxspeed=", 11))
+			return;
+	url = tok[nt - 1];
+	if (strncmp(url, "http://", 7) && strncmp(url, "https://", 8))
+		return;
+	for (i = 1; i < nt; i++)
+	{
+		if (!strcmp(tok[i], "--forthismap"))
+		{
+			forthismap = 1;
+			continue;
+		}
+		if (!strcmp(tok[i], "--as") && i + 1 < nt - 1 && strlen(tok[i + 1]) < sizeof(as) && strspn(tok[i + 1], "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-.") == strlen(tok[i + 1]) && !strstr(tok[i + 1], ".."))
+			dp_strlcpy(as, tok[i + 1], sizeof(as));
+		if (!strcmp(tok[i], "--for") && i + 1 < nt - 1 && !bsp[0])
+		{
+			const char *f = tok[i + 1];
+			size_t fl = strlen(f);
+			if (!strncmp(f, "maps/", 5) && fl > 9 && !strcmp(f + fl - 4, ".bsp") && fl - 9 < sizeof(bsp))
+			{
+				memcpy(bsp, f + 5, fl - 9);
+				bsp[fl - 9] = 0;
+			}
+		}
+		if (strlen(out) + strlen(tok[i]) + 2 < sizeof(out))
+		{
+			dp_strlcat(out, " ", sizeof(out));
+			dp_strlcat(out, tok[i], sizeof(out));
+		}
+	}
+	(void)forthismap;
+	if (bsp[0] && !tjn.early_map[0])
+	{
+		dp_strlcpy(tjn.early_map, bsp, sizeof(tjn.early_map));
+		dp_strlcpy(tjn.early_url, url, sizeof(tjn.early_url));
+		dp_strlcpy(tjn.early_name, as, sizeof(tjn.early_name));
+		Con_DPrintf("Join: the first fragment names %s (%s)\n", bsp, url);
+	}
+	if (touch_early_downloads.integer && tjn.nheld < (int)(sizeof(tjn.held) / sizeof(tjn.held[0])))
+	{
+		// held until the picture's own requests are through (a moment), then run as if the server had sent them now
+		if (!tjn.nheld)
+			tjn.hold_until = host.realtime + 2.5;
+		dp_strlcpy(tjn.held[tjn.nheld++], out, sizeof(tjn.held[0]));
+	}
+}
+
+static void release_held(void)
+{
+	int i;
+	if (!tjn.nheld || (host.realtime < tjn.hold_until && TouchCurl_ShotPending()))
+		return;
+	for (i = 0; i < tjn.nheld; i++)
+	{
+		Con_DPrintf("Join: starting early: %s\n", tjn.held[i]);
+		Cbuf_AddText(cmd_local, "\n");
+		Cbuf_AddText(cmd_local, tjn.held[i]);
+		Cbuf_AddText(cmd_local, "\n");
+	}
+	tjn.nheld = 0;
+}
+
+// netconn.c, every fragment of a reliable message from the server: the first one holds the `curl --pak` lines
+// (SV_SendServerinfo writes them before the precache lists, which are most of the message and, from a stock
+// server, arrive one round trip per fragment, ~10 s over a mobile link). They are read here, from the part of
+// the message that has arrived, so the map's picture and the downloads start one round trip after the connect.
+void TouchJoinName_PeekSignon(qbool from_server, const unsigned char *data, int length)
+{
+	int pos, limit = length < 8192 ? length : 8192, seen = 0;
+	if (!from_server || cls.state != ca_connected || cls.signon != 0 || !tjn.address[0])
+		return;
+	tjn.sig_bytes = length;
+	if (tjn.peek_done)
+		return;
+	for (pos = 0; pos + 11 < limit; pos++)
+	{
+		int end;
+		if (memcmp(data + pos, "curl --", 7))
+			continue;
+		for (end = pos; end < limit && data[end] != '\n' && data[end]; end++)
+			;
+		if (end >= limit)
+			break; // the line is not all here yet
+		if (++seen > tjn.peek_lines)
+		{
+			tjn.peek_lines++;
+			if (!memcmp(data + pos, "curl --finish_autodownload", 26))
+				tjn.peek_done = true;
+			else
+				peek_curl_line((const char *)data + pos, (size_t)(end - pos));
+		}
+		pos = end;
+	}
+	if (limit >= 8192)
+		tjn.peek_done = true; // past the head of the message
 }
 
 void TouchJoinName_Frame(void)
@@ -156,6 +327,7 @@ void TouchJoinName_Frame(void)
 	lhnetsocket_t *sock = NULL;
 	if (cls.state == ca_dedicated)
 		return;
+	release_held();
 	if (sv.active || cls.demoplayback)
 	{
 		was_trying = false;
@@ -241,4 +413,5 @@ void TouchJoinName_Init(void)
 	Cvar_RegisterVariable(&touch_join_address);
 	Cvar_RegisterVariable(&touch_join_name);
 	Cvar_RegisterVariable(&touch_join_label);
+	Cvar_RegisterVariable(&touch_early_downloads);
 }

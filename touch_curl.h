@@ -432,6 +432,7 @@ static void TouchCurl_Info(downloadinfo *di, double *progress, double *speed, in
 void TouchCurl_Init(void)
 {
 	Cvar_RegisterVariable(&curl_retries);
+	Cvar_RegisterVariable(&touch_joinshot_early);
 	Cvar_RegisterVariable(&curl_segments);
 	Cvar_RegisterVariable(&curl_segment_size);
 }
@@ -495,6 +496,7 @@ static void TouchCurl_RetryDone(downloadinfo *di)
 static void TouchCurl_RetryFrame(void)
 {
 	tc_retry_t **link = &tc_retries, *r;
+	TS_Tick(); // the map picture's requests: from the signon message's pack URL, before any download exists
 	while ((r = *link))
 	{
 		if (r->due < 0)
