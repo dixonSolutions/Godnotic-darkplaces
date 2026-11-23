@@ -26,6 +26,8 @@ comes from TouchJoinFail_Frame (touch_joinfail.c), Init from TouchJoinFail_Init.
 #include "netconn.h"
 #include "utf8lib.h"
 #include "touch_joinname.h"
+#include "touch_packname.h" // Touch: the pack named for the map
+#include "touch_joinpreview.h" // Touch: the map a join is for
 
 static cvar_t touch_join_address = {CF_CLIENT | CF_READONLY, "_touch_join_address", "", "Godnotic: the address of the server being joined or played on (kept after a failed join; empty in a local game)"};
 static cvar_t touch_join_name = {CF_CLIENT | CF_READONLY, "_touch_join_name", "", "Godnotic: that server's name, colour codes out, cut to 32 characters; empty while unknown"};
@@ -253,6 +255,14 @@ static void peek_curl_line(const char *line, size_t n)
 		}
 	}
 	(void)forthismap;
+	// no "--for maps/<map>.bsp" (a server that does not say what a pack is for): the pack named for the map the join
+	// is for (cts_mccormic-mark.pk3) is read for its picture just the same, from the first fragment
+	if (!bsp[0] && !tjn.early_map[0])
+	{
+		char jm[MAX_QPATH];
+		if (TouchJoinPreview_MapName(jm, sizeof(jm)) && tpn_url_names_map(url, jm))
+			dp_strlcpy(bsp, jm, sizeof(bsp));
+	}
 	if (bsp[0] && !tjn.early_map[0])
 	{
 		dp_strlcpy(tjn.early_map, bsp, sizeof(tjn.early_map));

@@ -43,6 +43,7 @@ Everything works on the desktop too, without a sink, for headless tests
 #include "touch_precache.h"
 #include "touch_joinpreview.h" // Touch: the "preview" join stage
 #include "touch_joinpreview_logic.h" // Touch: picture kinds, precache step
+#include "touch_netdl.h" // Touch: the server's own download on the join card
 #include "touch_music.h"
 #include "touch_datafetch.h"
 #include "touch_loadfs.h" // Touch: the theme pack may land after start-up
@@ -435,6 +436,8 @@ static void publish_connect(qbool force)
 	int n = 0, i;
 	double bytes = 0, speed = 0, progress = 0, dlbytes = 0;
 	int dlindex = -1;
+	double csqc_got = 0, csqc_total = 0, csqc_speed = 0;
+	qbool csqc;
 	Curl_downloadinfo_t *dl;
 	const char *stage = "idle";
 	if (cls.connect_trying)
@@ -454,6 +457,8 @@ static void publish_connect(qbool force)
 			dlbytes = TouchNet_CurlBytes(i);
 		}
 	}
+	// the server's own download over the game connection (csprogs.dat) is a download on the card too, while no curl one runs
+	csqc = n == 0 && cls.state == ca_connected && TouchNetDL_Progress(&csqc_got, &csqc_total, &csqc_speed);
 	if (cls.connect_trying)
 		stage = "connecting";
 	else if (TouchJoinPreview_Active() || TouchJoinPreview_Waiting())
@@ -467,7 +472,7 @@ static void publish_connect(qbool force)
 	// nothing is downloading, the client waits one round trip per fragment (a stock server). Say so, and for how long.
 	{
 		static double wait_since;
-		qbool waiting = cls.state == ca_connected && cls.signon == 0 && n == 0 && !cls.connect_trying;
+		qbool waiting = cls.state == ca_connected && cls.signon == 0 && n == 0 && !csqc && !cls.connect_trying;
 		if (!waiting)
 			wait_since = 0;
 		else if (!wait_since)
@@ -483,8 +488,16 @@ static void publish_connect(qbool force)
 	jb_kstr(&b, "label", TouchJoinName_Label(addr, label, sizeof(label)));
 	jb_kint(&b, "signon", cls.signon);
 	jb_kint(&b, "signons", SIGNONS);
-	jb_kint(&b, "downloads", n);
-	if (n > 0)
+	jb_kint(&b, "downloads", n + (csqc ? 1 : 0));
+	if (csqc)
+	{
+		jb_kstr(&b, "file", "csprogs.dat");
+		jb_knum(&b, "download_progress", csqc_total > 0 ? csqc_got / csqc_total : 0);
+		jb_knum(&b, "speed", csqc_speed);
+		jb_knum(&b, "download_bytes", csqc_got);
+		jb_knum(&b, "download_total", csqc_total);
+	}
+	else if (n > 0)
 	{
 		jb_kstr(&b, "file", dl[0].filename);
 		jb_knum(&b, "download_progress", progress);
@@ -511,6 +524,12 @@ static void publish_connect(qbool force)
 			all_bytes += TouchNet_CurlBytes(i);
 			if (dl[i].progress > 0 && dl[i].progress <= 1)
 				all_total += TouchNet_CurlBytes(i) / dl[i].progress;
+		}
+		if (csqc)
+		{
+			all_bytes = csqc_got;
+			all_total = csqc_total;
+			running = 1;
 		}
 		jb_knum(&b, "dl_bytes", all_bytes);
 		jb_knum(&b, "dl_total", all_total);
@@ -582,9 +601,15 @@ static void publish_connect(qbool force)
 			if (all_total < all_bytes)
 				all_total = all_bytes;
 		}
-		jb_kstr(&b, "dl_file", dlindex >= 0 ? dl[dlindex].filename : "");
+		if (csqc)
+		{
+			all_bytes = csqc_got;
+			all_total = csqc_total;
+			done = 0;
+		}
+		jb_kstr(&b, "dl_file", csqc ? "csprogs.dat" : dlindex >= 0 ? dl[dlindex].filename : "");
 		jb_kint(&b, "dl_files_done", done);
-		jb_kint(&b, "dl_files_total", nfiles);
+		jb_kint(&b, "dl_files_total", csqc ? 1 : nfiles);
 		jb_knum(&b, "dl_all_bytes", all_bytes);
 		jb_knum(&b, "dl_all_total", all_total);
 	}
@@ -1202,8 +1227,11 @@ static void fe_host(cmd_state_t *cmd)
 	Cbuf_AddText(cmd_local, va(line, sizeof(line), "map %s\n", map));
 }
 
-// A local bot match (Singleplayer / quick play): one slot for the player and
-// one per bot, no LAN listing.
+// A local bot match (Singleplayer / quick play): no LAN listing. maxplayers cannot change
+// while a match runs, so the slots are not sized to the bots asked for at the start: Server
+// control adds bots later and a game started with 1 bot (2 slots) refused every one after it.
+// Touch: room for the player and the 32 bots Server control allows
+#define FE_LOCAL_SLOTS 33
 static void fe_play(cmd_state_t *cmd)
 {
 	const char *type = arg(cmd, 2), *map = arg(cmd, 3);
@@ -1222,7 +1250,7 @@ static void fe_play(cmd_state_t *cmd)
 	Cbuf_AddText(cmd_local, (cvar_int("vid_touchscreen") || cvar_int("vid_touchscreen_detected") || cvar_int("touch_join_dialog_auto") >= 2)
 		? "sv_spectate 1\n" : "sv_spectate 0\n");
 	fe_set_cvar("_menu_welcome_dialog_available", "0");
-	Cbuf_AddText(cmd_local, va(line, sizeof(line), "maxplayers %d\nsv_public 0\nbot_number %d\n", max(bots + 1, 2), bots));
+	Cbuf_AddText(cmd_local, va(line, sizeof(line), "maxplayers %d\nsv_public 0\nbot_number %d\n", FE_LOCAL_SLOTS, bots));
 	if (*sk)
 		Cbuf_AddText(cmd_local, va(line, sizeof(line), "skill %d\n", bound(0, atoi(sk), 10)));
 	if (*tl)

@@ -62,10 +62,28 @@ static int tzs_find_in(const unsigned char *p, size_t n, const char *dir, const 
 	return 0;
 }
 /* the map's own picture: maps/<map>.jpg|png, else levelshots/<map>.jpg|png (the Quake 3 place) */
-static int tzs_find(const unsigned char *p, size_t n, const char *map, tzs_entry_t *out)
+static int tzs_find_exact(const unsigned char *p, size_t n, const char *map, tzs_entry_t *out)
 {
 	static const char *const exts[] = { ".jpg", ".png", NULL };
 	return tzs_find_in(p, n, "maps/", map, exts, 0, out) || tzs_find_in(p, n, "levelshots/", map, exts, 0, out);
+}
+/* A revision of a map keeps the first one's picture: sinister_full_r1's pack holds maps/sinister_full.jpg. Without an
+ * exact one, the pictures named by the map's name cut back at each '_' (sinister_full_r1 -> sinister_full -> sinister),
+ * longest first, at least 4 letters. */
+static int tzs_find(const unsigned char *p, size_t n, const char *map, tzs_entry_t *out)
+{
+	char base[64];
+	size_t len = strlen(map), i;
+	if (tzs_find_exact(p, n, map, out)) return 1;
+	if (len >= sizeof(base)) return 0;
+	memcpy(base, map, len + 1);
+	for (i = len; i-- > 4; )
+		if (map[i] == '_')
+		{
+			base[i] = 0;
+			if (tzs_find_exact(p, n, base, out)) return 1;
+		}
+	return 0;
 }
 /* no picture in the pack: its BSP, from which a picture can be made (touch_bspshot.h) */
 static int tzs_find_bsp(const unsigned char *p, size_t n, const char *map, tzs_entry_t *out)

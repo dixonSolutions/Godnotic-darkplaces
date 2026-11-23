@@ -224,6 +224,34 @@ void TouchNetDL_Stored(int start, int size)
 	cls.qw_downloadmemorycursize = furthest;
 }
 
+qbool TouchNetDL_Progress(double *got, double *total, double *speed)
+{
+	static double t0, b0, rate;
+	static int number = -1;
+	double now, pos;
+	if (!cls.qw_downloadname[0] || !cls.qw_downloadmemory || cls.qw_downloadmemorymaxsize <= 0)
+		return false;
+	now = Sys_DirtyTime();
+	pos = net_download_inorder.integer && tdl.number == cls.qw_downloadnumber ? tdl.pos : cls.qw_downloadmemorycursize;
+	if (number != cls.qw_downloadnumber || now - t0 > 5 || pos < b0)
+	{
+		number = cls.qw_downloadnumber;
+		t0 = now;
+		b0 = pos;
+		rate = 0;
+	}
+	else if (now - t0 >= 1)
+	{
+		rate = (pos - b0) / (now - t0);
+		t0 = now;
+		b0 = pos;
+	}
+	*got = pos;
+	*total = cls.qw_downloadmemorymaxsize;
+	*speed = rate;
+	return true;
+}
+
 void TouchNetDL_Init(void)
 {
 	Cvar_RegisterVariable(&net_download_inorder);

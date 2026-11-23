@@ -69,6 +69,8 @@ void TouchNet_Frame(double worktime);
 // HTTP downloads on the loading screen (libcurl.c, cl_screen.c): the bytes
 // a download has, and its line with the size and the time left
 void TouchNet_CurlProgress(int index, double bytes);
+// bytes a join's map picture may cost on a metered link (touch_net_metered); 0 = no limit
+unsigned TouchNet_MeteredLimit(void);
 // touch_curl.h: join_retry sends waiting download retries at once and sweeps dlcache of bad packs
 void TouchCurl_ManualRetry(void);
 // the bytes of download `index` fetched so far (over all its pieces), 0 when unknown

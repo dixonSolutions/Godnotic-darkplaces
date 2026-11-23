@@ -15,6 +15,7 @@
 #include "touch_joinpreview.h"
 #include "touch_loadfs.h"
 extern qbool TouchZip_Inflate(const unsigned char *, size_t, unsigned char *, size_t);
+extern unsigned TouchNet_MeteredLimit(void); // touch_net.c: bytes a picture may cost on a metered link, 0 = no limit
 extern qbool TouchJoinName_EarlyPack(const char *map, char *url, size_t size, char *name, size_t namesize);
 typedef struct ts_fetch_s {
 	struct ts_fetch_s *next;
@@ -335,6 +336,13 @@ static void TS_Resolve(ts_fetch_t *s, const unsigned char *dir, size_t dirn, uns
 		return;
 	}
 	if ((uint64_t)s->entry.offset + 30 > s->total) return;
+	// a metered link (mobile data): the picture is a courtesy, not worth more than a few hundred KB of it; a bigger one
+	// (a Quake 1 BSP is megabytes) stays the list's or the generic picture
+	if (!all && TouchNet_MeteredLimit() && s->entry.compressed > TouchNet_MeteredLimit())
+	{
+		Con_DPrintf("JOINSHOT %s: %u bytes is too much on a metered link\n", s->map, (unsigned)s->entry.compressed);
+		return;
+	}
 	if (all)
 	{
 		if (s->entry.offset < alln) TS_Member(s, all + s->entry.offset, alln - s->entry.offset, 0);

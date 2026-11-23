@@ -118,6 +118,30 @@ static float FT_Percentile(const float *sorted, int n, double p)
 	return sorted[bound(0, i, n - 1)];
 }
 
+// Resident and peak resident memory of the process in MB (Linux and Android:
+// /proc/self/status); -1 where there is no such file.
+static void FT_Memory(double *rss, double *peak)
+{
+	*rss = *peak = -1;
+#if defined(__linux__) || defined(__ANDROID__)
+	{
+		char line[128];
+		FILE *f = fopen("/proc/self/status", "r");
+		long kb;
+		if (!f)
+			return;
+		while (fgets(line, sizeof(line), f))
+		{
+			if (sscanf(line, "VmRSS: %ld kB", &kb) == 1)
+				*rss = kb / 1024.0;
+			else if (sscanf(line, "VmHWM: %ld kB", &kb) == 1)
+				*peak = kb / 1024.0;
+		}
+		fclose(f);
+	}
+#endif
+}
+
 static void TouchFrameTime_Shutdown(void)
 {
 	static float sorted[FT_MAX];
@@ -139,6 +163,11 @@ static void TouchFrameTime_Shutdown(void)
 		FT_Percentile(sorted, ft.count, 0.50), FT_Percentile(sorted, ft.count, 0.95),
 		FT_Percentile(sorted, ft.count, 0.99), hitches, 100.0 * hitches / ft.count,
 		sorted[ft.count - 1], sum / ft.count, ft.dropped);
+	{
+		double rss, peak;
+		FT_Memory(&rss, &peak);
+		Con_Printf("FRAMETIME_MEM rss=%.1f peak=%.1f (MB, this process)\n", rss, peak);
+	}
 	if (ft.hitchn)
 	{
 		Con_Printf("FRAMETIME_HITCHES n=%d t=", ft.hitchn);

@@ -149,6 +149,12 @@ static cvar_t touch_lan_gametype = {CF_CLIENT | CF_ARCHIVE, "touch_lan_gametype"
 static cvar_t touch_lan_map = {CF_CLIENT | CF_ARCHIVE, "touch_lan_map", "stormkeep", "Host screen: first map; empty for a random one, then the whole rotation"};
 static cvar_t touch_lan_bots = {CF_CLIENT | CF_ARCHIVE, "touch_lan_bots", "4", "Host screen: bots"};
 static cvar_t touch_lan_maxplayers = {CF_CLIENT | CF_ARCHIVE, "touch_lan_maxplayers", "8", "Host screen: player slots"};
+// Server control's last values (the QuakeC screen binds its controls to these, so they stay)
+static cvar_t touch_ctl_bots = {CF_CLIENT | CF_ARCHIVE, "touch_ctl_bots", "4", "Server control: bots to have"};
+static cvar_t touch_ctl_skill = {CF_CLIENT | CF_ARCHIVE, "touch_ctl_skill", "4", "Server control: bot skill"};
+static cvar_t touch_ctl_team = {CF_CLIENT | CF_ARCHIVE, "touch_ctl_team", "auto", "Server control: team the added bots join (auto, red, blue)"};
+static cvar_t touch_ctl_timelimit = {CF_CLIENT | CF_ARCHIVE, "touch_ctl_timelimit", "20", "Server control: time limit in minutes"};
+static cvar_t touch_ctl_fraglimit = {CF_CLIENT | CF_ARCHIVE, "touch_ctl_fraglimit", "30", "Server control: frag limit"};
 static cvar_t touch_lan_host_port = {CF_CLIENT | CF_ARCHIVE, "touch_lan_host_port", "26000", "Host screen: UDP port"};
 static cvar_t touch_lan_assist = {CF_CLIENT | CF_ARCHIVE, "touch_lan_assist", "7", "Host screen: the sv_touch_assist the game allows"};
 static cvar_t touch_lan_host_password = {CF_CLIENT | CF_PRIVATE, "touch_lan_host_password", "",
@@ -1507,6 +1513,11 @@ void TouchLAN_Init(void)
 	Cvar_RegisterVariable(&touch_lan_map);
 	Cvar_RegisterVariable(&touch_lan_bots);
 	Cvar_RegisterVariable(&touch_lan_maxplayers);
+	Cvar_RegisterVariable(&touch_ctl_bots);
+	Cvar_RegisterVariable(&touch_ctl_skill);
+	Cvar_RegisterVariable(&touch_ctl_team);
+	Cvar_RegisterVariable(&touch_ctl_timelimit);
+	Cvar_RegisterVariable(&touch_ctl_fraglimit);
 	Cvar_RegisterVariable(&touch_lan_host_port);
 	Cvar_RegisterVariable(&touch_lan_assist);
 	Cvar_RegisterVariable(&touch_lan_host_password);

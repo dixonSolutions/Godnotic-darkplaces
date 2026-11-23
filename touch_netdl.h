@@ -16,4 +16,8 @@ qbool TouchNetDL_Received(int start, int size);
 // csprogs.dat is not the same version as the server".
 void TouchNetDL_Stored(int start, int size);
 
+// The server's download in progress (csprogs.dat), for the join card: bytes received from 0, the file's
+// size as sent (0 until the server says), a speed in bytes/s over the last second or so. False when none.
+qbool TouchNetDL_Progress(double *got, double *total, double *speed);
+
 #endif

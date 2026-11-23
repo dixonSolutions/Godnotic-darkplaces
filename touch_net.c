@@ -59,6 +59,8 @@ static cvar_t net_reliable_rto_min = {CF_CLIENT | CF_SERVER, "net_reliable_rto_m
 static cvar_t net_reliable_rto_max = {CF_CLIENT | CF_SERVER, "net_reliable_rto_max", "1", "longest wait in seconds before a windowed reliable fragment is sent again (stock DarkPlaces always waits 1)"};
 static cvar_t net_signon_fast = {CF_CLIENT | CF_SERVER, "net_signon_fast", "1", "during a client's signon, wake up for its packets and answer at once instead of at the next frame or server tick (Godnotic); 0 = stock timing"};
 static cvar_t net_mtu = {CF_SERVER, "net_mtu", "0", "path MTU in bytes for clients' datagrams (Godnotic): 0 = the route's MTU to each client, as the system knows it (a VPN interface's 1280, say); no datagram is then an IP fragment"};
+static cvar_t touch_net_metered = {CF_CLIENT, "touch_net_metered", "0", "the link is metered (mobile data, or a Wi-Fi marked metered): optional fetches are held back and the join card says so; the app sets it per join (Godnotic)"};
+static cvar_t touch_net_metered_shot_kb = {CF_CLIENT | CF_ARCHIVE, "touch_net_metered_shot_kb", "256", "on a metered link a join's map picture is range-read from the server's pack only when it is at most this many KB (0 = never read it); packs themselves are always downloaded when the map needs them (Godnotic)"};
 static cvar_t touch_net_trace = {CF_CLIENT | CF_SERVER, "touch_net_trace", "0", "print every packet of a join with a timestamp (Godnotic, for scripts/net-trace-report.py); 2 = every packet, in the game too"};
 
 static cvar_t net_connect_retry = {CF_CLIENT | CF_ARCHIVE, "net_connect_retry", "0.4", "seconds before the first, and 2x before the second, repeat of a join's getchallenge when nothing answered (Godnotic; later repeats stay at 1 s); 0 = stock, a full second each time"};
@@ -1574,6 +1576,8 @@ void TouchNet_Init(void)
 	Cvar_RegisterVariable(&net_reconnect_server_min);
 	Cvar_RegisterVariable(&net_signon_fast);
 	Cvar_RegisterVariable(&touch_net_trace);
+	Cvar_RegisterVariable(&touch_net_metered);
+	Cvar_RegisterVariable(&touch_net_metered_shot_kb);
 	Cvar_RegisterVariable(&net_mtu);
 	Cvar_RegisterVariable(&net_reconnect);
 	Cvar_RegisterVariable(&net_reconnect_tries);
@@ -1630,4 +1634,12 @@ void TouchNet_AckAgain(struct netconn_s *conn, const void *packet, size_t length
 	if (!sendme_ok(packet) || !net_ack_twice.integer || cls.state != ca_connected || conn != cls.netcon || sv.active)
 		return;
 	NetConn_Write(conn->mysocket, packet, (int)length, &conn->peeraddress);
+}
+
+// A metered link limits what a join fetches for show: bytes a picture may cost, 0 = no limit (touch_curlshot.h)
+unsigned TouchNet_MeteredLimit(void)
+{
+	if (!touch_net_metered.integer)
+		return 0;
+	return touch_net_metered_shot_kb.integer > 0 ? (unsigned)touch_net_metered_shot_kb.integer * 1024u : 1u;
 }

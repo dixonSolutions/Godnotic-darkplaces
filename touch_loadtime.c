@@ -51,6 +51,14 @@ as they arrive. Neither applies in the menu or in the game.
 static cvar_t touch_loadtime = {CF_CLIENT | CF_SERVER, "touch_loadtime", "0", "print where start-up and each map load spent their time (Godnotic): 1 = at the main menu's first frame and at the first game frame after a load"};
 static cvar_t touch_load_restless = {CF_CLIENT, "touch_load_restless", "0", "do not wait for the frame limiter or sleep while a game is loading or the connection handshake runs (Godnotic); 0 = stock behaviour"};
 
+static cvar_t touch_skin_skipgloss = {CF_CLIENT, "touch_skin_skipgloss", "1", "do not load _gloss maps of skins and models while r_shadow_gloss is 0, since nothing draws them (Godnotic): about a sixth of a match's texture bytes; they load at the next map after r_shadow_gloss is raised; 0 = always load"};
+extern cvar_t r_shadow_gloss;
+
+qbool TouchSkin_WantGloss(void)
+{
+	return !touch_skin_skipgloss.integer || r_shadow_gloss.integer > 0;
+}
+
 static cvar_t touch_load_lazysbar = {CF_CLIENT, "touch_load_lazysbar", "1", "Xonotic: cache the engine status bar's Quake pictures when the engine HUD is first drawn instead of at every renderer start (Godnotic); 0 = at renderer start"};
 static cvar_t touch_load_lazypics = {CF_CLIENT, "touch_load_lazypics", "1", "defer existing menu and client precache_pic images until first use (Godnotic); 0 = load at precache"};
 static cvar_t touch_load_lazydeflate = {CF_SERVER, "touch_load_lazydeflate", "1", "deflate csprogs.dat when a client first downloads it instead of at every map start (Godnotic)"};
@@ -601,6 +609,7 @@ void TouchLoadTime_Init(void)
 	TouchCvar_Init();
 	Cvar_RegisterVariable(&touch_loadtime);
 	Cvar_RegisterVariable(&touch_load_restless);
+	Cvar_RegisterVariable(&touch_skin_skipgloss);
 	Cvar_RegisterVariable(&touch_load_lazysbar);
 	Cvar_RegisterVariable(&touch_load_lazypics);
 	Cvar_RegisterVariable(&touch_load_lazytexvecs);
