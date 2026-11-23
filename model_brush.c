@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "polygon.h"
 #include "curves.h"
 #include "wad.h"
+#include "touch_precache.h" // Touch: the join card's sub-steps and the load profile
 
 
 cvar_t r_trippy = {CF_CLIENT, "r_trippy", "0", "easter egg"};
@@ -5233,6 +5234,7 @@ static void Mod_Q3BSP_LoadTextures(lump_t *l)
 
 	for (i = 0;i < count;i++)
 	{
+		TouchPre_Sub("textures", i, count); // Touch: texture n of m on the card
 		out[i].surfaceflags = LittleLong(in[i].surfaceflags);
 		out[i].supercontents = Mod_Q3BSP_SuperContentsFromNativeContents(LittleLong(in[i].contents));
 		Mod_LoadTextureFromQ3Shader(loadmodel->mempool, loadmodel->name, out + i, in[i].name, true, true, TEXF_MIPMAP | TEXF_ISWORLD | TEXF_PICMIP | TEXF_COMPRESS, MATERIALFLAG_WALL);
@@ -7725,8 +7727,11 @@ static void Mod_Q3BSP_Load(model_t *mod, void *buffer, void *bufferend)
 	if (mod->texturepool == NULL)
 		mod->texturepool = R_AllocTexturePool();
 
+	TouchPre_Mark("bsp_read"); // Touch: profile and card sub-steps
 	Mod_Q3BSP_LoadEntities(&header->lumps[Q3LUMP_ENTITIES]);
+	TouchPre_Mark("entities"); // Touch:
 	Mod_Q3BSP_LoadTextures(&header->lumps[Q3LUMP_TEXTURES]);
+	TouchPre_Mark("textures"); // Touch:
 	Mod_Q3BSP_LoadPlanes(&header->lumps[Q3LUMP_PLANES]);
 	if (header->version == Q3BSPVERSION_IG)
 		Mod_Q3BSP_LoadBrushSides_IG(&header->lumps[Q3LUMP_BRUSHSIDES]);
@@ -7734,22 +7739,30 @@ static void Mod_Q3BSP_Load(model_t *mod, void *buffer, void *bufferend)
 		Mod_Q3BSP_LoadBrushSides(&header->lumps[Q3LUMP_BRUSHSIDES]);
 	Mod_Q3BSP_LoadBrushes(&header->lumps[Q3LUMP_BRUSHES]);
 	Mod_Q3BSP_LoadEffects(&header->lumps[Q3LUMP_EFFECTS]);
+	TouchPre_Mark("collision"); // Touch:
 	Mod_Q3BSP_LoadVertices(&header->lumps[Q3LUMP_VERTICES]);
 	Mod_Q3BSP_LoadTriangles(&header->lumps[Q3LUMP_TRIANGLES]);
+	TouchPre_Mark("geometry"); // Touch:
 	Mod_Q3BSP_LoadLightmaps(&header->lumps[Q3LUMP_LIGHTMAPS], &header->lumps[Q3LUMP_FACES]);
+	TouchPre_Mark("lightmaps"); // Touch:
 	Mod_Q3BSP_LoadFaces(&header->lumps[Q3LUMP_FACES]);
+	TouchPre_Mark("faces"); // Touch:
 	Mod_Q3BSP_LoadModels(&header->lumps[Q3LUMP_MODELS]);
 	Mod_Q3BSP_LoadLeafBrushes(&header->lumps[Q3LUMP_LEAFBRUSHES]);
 	Mod_Q3BSP_LoadLeafFaces(&header->lumps[Q3LUMP_LEAFFACES]);
 	Mod_Q3BSP_LoadLeafs(&header->lumps[Q3LUMP_LEAFS]);
+	TouchPre_Mark("models"); // Touch:
 	Mod_Q3BSP_LoadNodes(&header->lumps[Q3LUMP_NODES]);
+	TouchPre_Mark("tree"); // Touch:
 	Mod_Q3BSP_LoadLightGrid(&header->lumps[Q3LUMP_LIGHTGRID]);
 	Mod_Q3BSP_LoadPVS(&header->lumps[Q3LUMP_PVS]);
+	TouchPre_Mark("grid_pvs"); // Touch:
 	loadmodel->brush.numsubmodels = loadmodel->brushq3.num_models;
 
 	// the MakePortals code works fine on the q3bsp data as well
 	if (mod_bsp_portalize.integer && cls.state != ca_dedicated)
 		Mod_BSP_MakePortals();
+	TouchPre_Mark("portals"); // Touch:
 
 	// FIXME: shader alpha should replace r_wateralpha support in q3bsp
 	loadmodel->brush.supportwateralpha = true;
@@ -7787,6 +7800,7 @@ static void Mod_Q3BSP_Load(model_t *mod, void *buffer, void *bufferend)
 			mod->brush.LightPoint = NULL;
 			mod->brush.AmbientSoundLevelsForPoint = NULL;
 		}
+		TouchPre_Sub("submodels", i, loadmodel->brush.numsubmodels); // Touch: submodel n of m on the card
 		mod->brush.submodel = i;
 		if (loadmodel->brush.submodels)
 			loadmodel->brush.submodels[i] = mod;
@@ -7842,13 +7856,17 @@ static void Mod_Q3BSP_Load(model_t *mod, void *buffer, void *bufferend)
 		Mod_MakeCollisionBIH(mod, true, &mod->render_bih);
 
 		// generate VBOs and other shared data before cloning submodels
+		TouchPre_MarkFirst(i, "submodels"); // Touch:
 		if (i == 0)
 			Mod_BuildVBOs();
+		TouchPre_MarkFirst(i, "vbos"); // Touch:
 	}
 	mod = loadmodel;
 
 	// make the model surface list (used by shadowing/lighting)
+	TouchPre_Mark("submodels"); // Touch:
 	Mod_MakeSortedSurfaces(loadmodel);
+	TouchPre_Mark("sorted"); // Touch:
 
 	if (mod_q3bsp_sRGBlightmaps.integer)
 	{

@@ -1,5 +1,7 @@
 
 #include "quakedef.h"
+#include "touch_loadtime.h" // Touch: TLT_SCRDRAW
+#include "touch_precache.h" // Touch: redraw duty
 #include "cl_video.h"
 #include "image.h"
 #include "jpeg.h"
@@ -2037,7 +2039,7 @@ void SCR_PushLoadingScreen (const char *msg, float len_in_parent)
 
 	if (scr_loading)
 		CL_UpdateScreen();
-	{ extern void TouchFE_Loading(const char *, float); TouchFE_Loading(s->msg, s->absolute_loading_amount_min); } // Touch: native loading screen progress and Cancel
+	{ extern void TouchFE_Loading(const char *, float, float); TouchFE_Loading(s->msg, s->absolute_loading_amount_min, s->absolute_loading_amount_len); } // Touch: native loading screen progress and Cancel
 	TouchHUD_LoadingAbortPoint(); // Touch: CANCEL tapped, the join stops before this item loads
 }
 
@@ -2405,10 +2407,13 @@ void CL_UpdateScreen(void)
 			double now = Sys_DirtyTime();
 			if (now - lastupdate >= 0 && now - lastupdate < min(1.0f / scr_loadingscreen_maxfps.value, 0.1))
 				return;
+			if (TouchPre_RedrawTooSoon(now)) // Touch: a slow frame must not make the load a series of redraws
+				return;
 			lastupdate = now;
 		}
 	}
 
+	TOUCH_LT_SCOPE(TLT_SCRDRAW); // Touch: time the frames a load draws
 	SCR_UpdateVars();
 
 	R_FrameData_NewFrame();

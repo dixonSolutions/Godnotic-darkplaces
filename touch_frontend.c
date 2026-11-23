@@ -40,6 +40,7 @@ Everything works on the desktop too, without a sink, for headless tests
 #include "cl_screen.h"
 #include "libcurl.h"
 #include "touch_frontend.h"
+#include "touch_precache.h"
 #include "touch_joinpreview.h" // Touch: the "preview" join stage
 #include "touch_joinpreview_logic.h" // Touch: picture kinds, precache step
 #include "touch_music.h"
@@ -113,7 +114,7 @@ static struct
 	char *watch[TOUCHFE_MAX_WATCH];
 	// a load in progress (TouchFE_Loading), for the connect topic
 	char load_msg[64];
-	float load_fraction;
+	float load_min, load_len; // the current item's ends on the whole bar
 	double load_published;
 	char events[4096];      // pending events (desktop fe_take)
 	struct { char verb[16]; touchfe_verb_fn fn; } verbs[8];
@@ -517,7 +518,12 @@ static void publish_connect(qbool force)
 		jb_kint(&b, "dl_queued", queued);
 	}
 	jb_kstr(&b, "load", scr_loading ? fe.load_msg : "");
-	jb_knum(&b, "load_progress", scr_loading ? fe.load_fraction : 0);
+	// the bar: the item's start plus the share of it done (the world model reports its parts)
+	jb_knum(&b, "load_progress", scr_loading ? fe.load_min + fe.load_len * TouchPre_SubFraction() : 0);
+	// what the load is on: models, world (texture n of m), worldsetup, sounds
+	jb_kstr(&b, "load_stage", scr_loading ? TouchPre_Stage() : "");
+	jb_kint(&b, "load_n", scr_loading ? TouchPre_N() : 0);
+	jb_kint(&b, "load_m", scr_loading ? TouchPre_M() : 0);
 	jb_kbool(&b, "local", sv.active || TouchJoinPreview_LocalLoading());
 	// the map's picture for the native card, from the first moment of a join until the
 	// world draws: only the named map's own picture, if available.
@@ -1634,12 +1640,23 @@ double TouchFE_MaxFPS(double maxfps)
 	return maxfps;
 }
 
-void TouchFE_Loading(const char *msg, float fraction)
+void TouchFE_LoadingTick(void)
 {
+	// inside one long item (the world model): the share done moves the bar
+	if (!fe.attached || Sys_DirtyTime() - fe.load_published < 0.2)
+		return;
+	fe.load_published = Sys_DirtyTime();
+	publish_connect(false);
+}
+
+void TouchFE_Loading(const char *msg, float min, float len)
+{
+	TouchPre_Item(msg, min, len);
 	if (!fe.attached)
 		return;
 	dp_strlcpy(fe.load_msg, msg ? msg : "", sizeof(fe.load_msg));
-	fe.load_fraction = fraction;
+	fe.load_min = min;
+	fe.load_len = len;
 	// a load runs inside one frame: tell the UI from here, a few times a second
 	if (Sys_DirtyTime() - fe.load_published > 0.2)
 	{

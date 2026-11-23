@@ -119,7 +119,7 @@ void TouchJoinPreview_SetMap(const char *map)
 	TouchCurl_ClearJoinShot();
 	{ extern void TouchMusic_BeginJoin(void); TouchMusic_BeginJoin(); }
 	dp_strlcpy(jp_localmap, map ? map : "", sizeof(jp_localmap));
-	TouchFE_Loading("", 0); // the native card gets the map now, not at the first load step
+	TouchFE_Loading("", 0, 0); // the native card gets the map now, not at the first load step
 }
 
 static qbool JP_LocalLoading(void)

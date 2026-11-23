@@ -451,6 +451,10 @@ static qbool TouchCurl_Retry(downloadinfo *di, int status, CURLcode error)
 	int max = curl_retries.integer;
 	if (max <= 0 || status == 2 /* CURL_DOWNLOAD_ABORTED, declared below */ || di->buffer || di->post_content_type || strncmp(di->filename, "dlcache/", 8))
 		return false;
+	// the server answered 4xx (no such file, forbidden): trying again only
+	// holds the join up for a minute; 408 and 429 are worth another try
+	if (status == 3 /* CURL_DOWNLOAD_SERVERERROR, error is the HTTP code */ && (int)error >= 400 && (int)error < 500 && (int)error != 408 && (int)error != 429)
+		return false;
 	for (r = tc_retries; r; r = r->next)
 		if (!strcmp(r->fn, di->filename))
 			break;

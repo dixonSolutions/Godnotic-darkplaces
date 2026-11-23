@@ -38,6 +38,7 @@ as they arrive. Neither applies in the menu or in the game.
 #include "touch_loadfs.h"
 #include "touch_loadcvar.h"
 #include "touch_net.h"
+#include "touch_precache.h"
 #include "image.h"
 #if defined(__ANDROID__) || defined(ANDYSU_SWAP)
 #include "andysu_engine.h"
@@ -87,6 +88,7 @@ static const char *tlt_names[TLT_COUNT] =
 	"GLSL compile+link",
 	"file read (FS_LoadFile)",
 	"cvar list insert",
+	"screen redraws (load)",
 };
 
 static const char *tlc_names[TLC_COUNT] =
@@ -221,6 +223,9 @@ static double TLT_ProcessAgeMs(void)
 #endif
 }
 
+double TouchLoadTime_PhaseMs(int phase) { return phase >= 0 && phase < TLT_COUNT ? tlt.total[phase] * 1000.0 : 0; }
+int TouchLoadTime_PhaseCalls(int phase) { return phase >= 0 && phase < TLT_COUNT ? tlt.calls[phase] : 0; }
+
 static void TLT_ResetStretch(void)
 {
 	int i;
@@ -260,6 +265,7 @@ static void TLT_StartLoad(double when)
 		tlt.signon_frame[i] = -1;
 	}
 	TLT_ResetStretch();
+	TouchPre_Reset();
 }
 
 static void TouchLoadTime_Start_f(cmd_state_t *cmd)
@@ -330,6 +336,7 @@ void TouchLoadTime_Frame(void)
 		tlt.worst_frame = 0;
 		tlt.worst_play = 0;
 		tlt.frames_after = 0;
+		TouchPre_PrintSummary();
 		if (touch_loadtime.integer)
 		{
 			Con_Printf("LOADTIME game_ready load=%.1f proc=%.1f frames=%d map=%s\n", (now - tlt.load_start) * 1000.0,
@@ -601,6 +608,7 @@ void TouchLoadTime_Init(void)
 	Cvar_RegisterVariable(&touch_loadtime_menu);
 	Cvar_RegisterVariable(&touch_loadtime_game);
 	TouchJoinPreview_Init();
+	TouchPre_Init();
 	TP_Init();
 	Cmd_AddCommand(CF_CLIENT | CF_SERVER, "touch_loadtime_start", TouchLoadTime_Start_f, "start timing a load now (put it before map or connect); touch_loadtime 1 prints the result at the first game frame");
 	Cmd_AddCommand(CF_CLIENT | CF_SERVER, "touch_loadtime_report", TouchLoadTime_Report_f, "print the load phase totals gathered since the last report");

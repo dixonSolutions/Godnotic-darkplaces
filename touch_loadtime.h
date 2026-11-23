@@ -33,6 +33,7 @@ typedef enum touch_lt_phase_e
 	TLT_SHADER,        // GLSL compile and link
 	TLT_FILEREAD,      // FS_LoadFile (open, read, inflate)
 	TLT_CVARLINK,      // Cvar_Link (new cvar into the sorted list)
+	TLT_SCRDRAW,       // CL_UpdateScreen frames drawn while a load runs
 	TLT_COUNT
 }
 touch_lt_phase_t;
@@ -52,6 +53,9 @@ void TouchLoadTime_Begin(int phase);
 void TouchLoadTime_End(int phase);
 void TouchLoadTime_Count(int counter);
 void TouchLoadTime_AddBytes(long long bytes);
+// Total ms and calls of a phase since the last table reset (touch_precache.c)
+double TouchLoadTime_PhaseMs(int phase);
+int TouchLoadTime_PhaseCalls(int phase);
 
 // Times the rest of the enclosing block (GCC/Clang cleanup attribute; other
 // compilers just do not time it).

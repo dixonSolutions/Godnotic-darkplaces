@@ -47,6 +47,7 @@ double TouchFE_MaxFPS(double maxfps);
 qbool TouchFE_MenuHidden(void);
 // cl_screen.c, SCR_PushLoadingScreen: a load's progress for the native
 // loading screen, and its Cancel, read while the engine thread is busy.
-void TouchFE_Loading(const char *msg, float fraction);
+void TouchFE_Loading(const char *msg, float min, float len);
+void TouchFE_LoadingTick(void); // inside one long item: publish its progress (touch_precache.c)
 
 #endif
