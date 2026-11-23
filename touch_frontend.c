@@ -499,6 +499,23 @@ static void publish_connect(qbool force)
 		jb_kint(&b, "precache_n", kind == 1 ? cl.loadmodel_current : kind == 2 ? cl.loadsound_current : 0);
 		jb_kint(&b, "precache_total", kind == 1 ? cl.loadmodel_total : kind == 2 ? cl.loadsound_total : 0);
 	}
+	// every download together (the card's one bar): bytes done and total of the running ones, how many run and wait
+	{
+		double all_bytes = 0, all_total = 0;
+		int running = 0, queued = 0;
+		for (i = 0; i < n; i++)
+		{
+			if (dl[i].queued) { queued++; continue; }
+			running++;
+			all_bytes += TouchNet_CurlBytes(i);
+			if (dl[i].progress > 0 && dl[i].progress <= 1)
+				all_total += TouchNet_CurlBytes(i) / dl[i].progress;
+		}
+		jb_knum(&b, "dl_bytes", all_bytes);
+		jb_knum(&b, "dl_total", all_total);
+		jb_kint(&b, "dl_running", running);
+		jb_kint(&b, "dl_queued", queued);
+	}
 	jb_kstr(&b, "load", scr_loading ? fe.load_msg : "");
 	jb_knum(&b, "load_progress", scr_loading ? fe.load_fraction : 0);
 	jb_kbool(&b, "local", sv.active || TouchJoinPreview_LocalLoading());

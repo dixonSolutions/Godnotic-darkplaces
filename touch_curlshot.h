@@ -46,10 +46,22 @@ static size_t TS_Write(void *data, size_t size, size_t n, void *arg)
 	memcpy(s->buf + s->have, data, bytes); s->have += bytes;
 	return bytes;
 }
+static size_t TS_Header(char *data, size_t size, size_t n, void *arg)
+{
+	// "Content-Range: bytes 0-0/12345": the size of a pack whose download has not started
+	ts_fetch_t *s = (ts_fetch_t *)arg;
+	size_t bytes = size * n;
+	if (bytes > 15 && !strncasecmp(data, "Content-Range:", 14))
+	{
+		const char *slash = (const char *)memchr(data, '/', bytes);
+		if (slash) s->total = (uint64_t)strtoull(slash + 1, NULL, 10);
+	}
+	return bytes;
+}
 static qbool TS_Start(ts_fetch_t *s, uint64_t from, size_t size, int stage)
 {
 	char range[64];
-	if (!size || from > s->total || size > s->total - from) return false;
+	if (!size || (stage != 0 && (from > s->total || size > s->total - from))) return false;
 	s->buf = (unsigned char *)Z_Malloc(size);
 	if (!s->buf) return false;
 	s->curl = qcurl_easy_init();
@@ -62,6 +74,8 @@ static qbool TS_Start(ts_fetch_t *s, uint64_t from, size_t size, int stage)
 	qcurl_easy_setopt(s->curl, CURLOPT_FOLLOWLOCATION, 1);
 	qcurl_easy_setopt(s->curl, CURLOPT_WRITEFUNCTION, TS_Write);
 	qcurl_easy_setopt(s->curl, CURLOPT_WRITEDATA, s);
+	qcurl_easy_setopt(s->curl, (CURLoption)(CURLOPTTYPE_FUNCTIONPOINT + 79), TS_Header); // CURLOPT_HEADERFUNCTION
+	qcurl_easy_setopt(s->curl, (CURLoption)(CURLOPTTYPE_OBJECTPOINT + 29), s); // CURLOPT_HEADERDATA
 	qcurl_easy_setopt(s->curl, CURLOPT_PRIVATE, s);
 	qcurl_easy_setopt(s->curl, CURLOPT_LOW_SPEED_LIMIT, (long)256);
 	qcurl_easy_setopt(s->curl, CURLOPT_LOW_SPEED_TIME, (long)15);
@@ -90,13 +104,26 @@ static void TS_Frame(void)
 		const char *url = NULL;
 		char path[MAX_QPATH];
 		size_t tail;
-		if (!di->started || !di->curle || !di->stream || di->loadtype != LOADTYPE_PAK || di->maxspeed > 0 || curl_maxspeed.value > 0) continue;
+		qbool running = di->started && di->curle && di->stream;
+		if (di->loadtype != LOADTYPE_PAK || di->maxspeed > 0 || curl_maxspeed.value > 0) continue;
 		for (s = ts_fetches; s && s->di != di; s = s->next) {}
 		if (s) continue;
 		dpsnprintf(path, sizeof(path), "maps/%s.jpg", map);
 		if (FS_FileExists(path)) return;
 		dpsnprintf(path, sizeof(path), "maps/%s.png", map);
 		if (FS_FileExists(path)) return;
+		if (!running)
+		{
+			// Touch: the map's pack waits in the queue behind the others (4 at a time): ask its size and tail
+			// now, beside the downloads, so the levelshot does not wait for the queue
+			if (!di->url[0] || !strstr(di->url, map) || (strncmp(di->url, "http://", 7) && strncmp(di->url, "https://", 8))) continue;
+			s = (ts_fetch_t *)Z_Malloc(sizeof(*s));
+			s->di = di; s->generation = ts_generation; s->total = 0;
+			dp_strlcpy(s->map, map, sizeof(s->map)); dp_strlcpy(s->url, di->url, sizeof(s->url));
+			s->next = ts_fetches; ts_fetches = s;
+			if (!TS_Start(s, 0, 1, 0)) s->stage = -1;
+			return;
+		}
 		qcurl_easy_getinfo(di->curle, CURLINFO_RESPONSE_CODE, &code);
 		qcurl_easy_getinfo(di->curle, CURLINFO_CONTENT_LENGTH_DOWNLOAD, &length);
 		if ((code != 200 && code != 206) || length <= 0 || length > 4294967295.0 || qcurl_easy_getinfo(di->curle, CURLINFO_EFFECTIVE_URL, &url) != CURLE_OK || !url || (strncmp(url, "http://", 7) && strncmp(url, "https://", 8))) continue;
@@ -122,7 +149,8 @@ static qbool TS_Done(CURL *curl, CURLcode result)
 		qcurl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &code);
 		if (s->generation == ts_generation && result == CURLE_OK && code == 206 && s->have == s->want)
 		{
-			if (s->stage == 1 && tzs_directory(s->buf, s->have, s->total, &off, &len)) { at = off; next = 2; }
+			if (s->stage == 0 && s->total > 22) { size_t t = (size_t)min(s->total, (uint64_t)65557); at = s->total - t; len = (uint32_t)t; next = 1; }
+			else if (s->stage == 1 && tzs_directory(s->buf, s->have, s->total, &off, &len)) { at = off; next = 2; }
 			else if (s->stage == 2 && tzs_find(s->buf, s->have, s->map, &s->entry) && (uint64_t)s->entry.offset + 30 <= s->total) { at = s->entry.offset; len = 30; next = 3; }
 			else if (s->stage == 3 && tzs_u32(s->buf) == 0x04034b50u && tzs_u16(s->buf+8) == s->entry.method && !(tzs_u16(s->buf+6) & 1)) { at = (uint64_t)s->entry.offset + 30 + tzs_u16(s->buf+26) + tzs_u16(s->buf+28); len = s->entry.compressed; next = 4; }
 			else if (s->stage == 4)

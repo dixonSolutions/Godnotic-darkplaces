@@ -3,6 +3,7 @@ Godnotic UI bridge: connections, the protocol, the frame, console commands and m
 docs/UI_BRIDGE.md is the contract; touch_uib_store.c holds the tree.
 */
 #include "quakedef.h"
+#include "touch_frontend.h"
 #include "thread.h"
 #include "touch_uib_int.h"
 #include "touch_playermodel.h" // Touch: player model import
@@ -764,7 +765,8 @@ int TouchUIB_LoadingCardUp(void)
 {
 #ifdef CONFIG_MENU
 	extern qbool scr_loading;
-	if (!touch_loading_card.integer || cls.state == ca_dedicated)
+	// the app's cvar, or any attached native front end (which presents every join and load with its card, whatever its version sets)
+	if (!(touch_loading_card.integer || TouchFE_MenuHidden()) || cls.state == ca_dedicated)
 		return 0;
 	// only while something is loading: a value left at 1 hides nothing in a match or in the menu
 	return scr_loading || cls.connect_trying || (cls.state == ca_connected && cls.signon < SIGNONS);
