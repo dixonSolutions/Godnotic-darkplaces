@@ -1,5 +1,6 @@
 
 #include "quakedef.h"
+#include "touch_q1fix.h" // Touch: Quake 1 content fixes
 #include "touch_loadtime.h" // Touch: TLT_SCRDRAW
 #include "touch_precache.h" // Touch: redraw duty
 #include "cl_video.h"
@@ -1846,7 +1847,9 @@ static void SCR_DrawScreen (void)
 		SCR_DrawPause ();
 		if (!r_letterbox.value)
 		{
+			TouchQ1_SbarBegin(); // Touch: the engine HUD rows keep their pitch
 			Sbar_Draw();
+			TouchQ1_SbarEnd(); // Touch:
 			if (CLVM_prog->loaded && CLVM_prog->flag & PRVM_CSQC_SIMPLE)
 				CL_VM_DrawHud(r_stereo_side ? 0.0 : max(0.0, cl.time - cl.oldtime));
 		}

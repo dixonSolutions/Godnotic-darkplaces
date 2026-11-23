@@ -16,6 +16,7 @@ are touch_rescue.h's.
 #include "touch_hud.h"
 #include "touch_aim.h"
 #include "touch_hook.h"
+#include "touch_q1fix.h"
 #include "touch_rescue.h"
 #include "touch_turn.h"
 #include "touch_pause.h"
@@ -787,6 +788,7 @@ void TouchHook_Init(void)
 	TouchFE_Init(); // native front-end bridge (touch_frontend.c)
 	TouchMention_Init();
 	TouchChatLog_Init();
+	TouchQ1_Init();
 	Cvar_RegisterVariable(&cl_touch_hook_rescue);
 	Cvar_RegisterVariable(&cl_touch_hook_rescue_turn);
 	Cvar_RegisterVariable(&cl_touch_hook_rescue_range);

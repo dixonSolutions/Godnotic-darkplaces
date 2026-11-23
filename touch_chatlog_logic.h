@@ -88,13 +88,15 @@ static inline float TouchChatLog_FadeAfterClear(float stock, double now, double 
 	return (stock > 0 && stock < w) ? stock : w;
 }
 
-// The icons beside the box, in a row ending at the box's right edge, all the
-// same size with a gap of icon_size * 0.4 between neighbours. Slot 0 is the
-// right-most (share), then download, copy, clear going left.
+// The icons docked on the box, in a row starting at the box's left edge (the
+// chat text's x), all the same size with a gap of icon_size * 0.4 between
+// neighbours. Slot 0 is the right-most (share), then download, copy, clear
+// going left; the row reads clear, copy, download, share.
 #define TCL_ICONS 4
 static inline float TouchChatLog_IconX(float x, float w, float icon_size, int slot)
 {
-	return x + w - icon_size - (float)slot * icon_size * 1.4f;
+	(void)w;
+	return x + (float)(TCL_ICONS - 1 - slot) * icon_size * 1.4f;
 }
 
 // Is the point inside the square icon at ix, iy of side s?

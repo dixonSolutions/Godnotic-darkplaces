@@ -267,13 +267,16 @@ void TouchChatLog_Draw(float x, float y, float w, float size, int stock_lines)
 	lines = TouchChatLog_BoxLines(visible, 2, maxl);
 	tcl_box_lines = lines;
 	tcl_scroll = TouchChatLog_ClampScroll(&cl_log, tcl_scroll, lines);
+	/* the stock chat area draws its lines bottom-aligned in a rect of maxl lines:
+	 * the box, its icons and the scrolled view sit on those lines, not on the rect's top */
+	y += (float)(max(maxl, lines) - lines) * size;
 
-	/* four plain outline icons, one size, evenly spaced in a row just outside the
-	 * box's top right: clear, copy, download, share (right-most) */
+	/* four plain outline icons, one size, evenly spaced in a row docked just above
+	 * the box's first line, from the chat text's x: clear, copy, download, share */
 	tcl_isz = size * 1.6f;
 	for (i = 0; i < TCL_ICONS; i++)
 		tcl_ix[i] = TouchChatLog_IconX(x, w, tcl_isz, i);
-	tcl_iy = max(0.0f, y - tcl_isz - 2);
+	tcl_iy = max(0.0f, y - tcl_isz - 1);
 	{
 		float a = tcl_scroll ? 0.9f : 0.5f, s = tcl_isz, t = max(1.0f, s * 0.07f);
 		for (i = 0; i < TCL_ICONS; i++)

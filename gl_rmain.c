@@ -20,6 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_main.c
 
 #include "quakedef.h"
+#include "touch_q1fix.h" // Touch: Quake 1 content fixes
 #include "r_shadow.h"
 #include "polygon.h"
 #include "image.h"
@@ -5558,6 +5559,7 @@ void R_UpdateVariables(void)
 			r_refdef.scene.lightmapintensity *= r_refdef.scene.rtlightstylevalue[0];
 		}
 	}
+	TouchQ1_LightScale(&r_refdef.scene.lightmapintensity); // Touch: Quake 1 worlds are lit far darker than Xonotic maps
 	if (r_showsurfaces.integer)
 	{
 		r_refdef.scene.rtworld = false;
