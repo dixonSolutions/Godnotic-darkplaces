@@ -543,20 +543,25 @@ void TouchMention_Draw(float x, float v, float size)
 	{
 		int shown = min(tm_pick.n, TM_MAX_SHOWN);
 		float rowh = size * 1.4f, w = size * 18.0f, h = rowh * shown;
-		/* above the input line when it fits there (the system keyboard's panel floats low
-		 * and to the right, so the top left stays clear), else below it */
-		if (v - h >= 0)
-			y = v - h;
-		else if (y + h > vid_conheight.value)
-			y = max(0.0f, v - h);
+		/* below the input line, where the chat wedge at the top of the screen leaves room; above
+		 * it only when there is none (a soft keyboard covers the lower half on a phone) */
+		float limit = vid_conheight.value;
+		int below;
+#ifdef __ANDROID__
+		limit *= 0.55f;
+#endif
+		y = TouchMention_ListY(v, y, h, limit, &below);
+		(void)below;
 		tm_pick.x = x; tm_pick.y = y; tm_pick.w = w; tm_pick.rowh = rowh;
-		DrawQ_Fill(x, y, w, h, 0.02f, 0.04f, 0.08f, 0.85f, 0);
+		/* tinted glass, as the other Touch panels: translucent dark body, light rim, rounded corners */
+		DrawQ_RoundedBox(x + w * 0.5f, y + h * 0.5f, w * 0.5f, h * 0.5f, rowh * 0.3f, 0, 0.07f, 0.08f, 0.10f, 0.62f, 0);
+		DrawQ_RoundedBox(x + w * 0.5f, y + h * 0.5f, w * 0.5f, h * 0.5f, rowh * 0.3f, max(1.0f, rowh / 24.0f), 1, 1, 1, 0.35f, 0);
 		for (i = 0; i < shown; i++)
 		{
 			const tm_entry_t *e = &tm_roster[tm_pick.idx[tm_off + i]];
 			char label[TM_MAX_NAME + 16];
 			if (tm_off + i == tm_sel)
-				DrawQ_Fill(x, y + i * rowh, w, rowh, 0.2f, 0.45f, 0.9f, 0.7f, 0);
+				DrawQ_RoundedBox(x + w * 0.5f, y + (i + 0.5f) * rowh, w * 0.5f - 2, rowh * 0.5f - 1, rowh * 0.25f, 0, 0.208f, 0.518f, 0.894f, 0.55f, 0);
 			dpsnprintf(label, sizeof(label), "@%s%s", e->name, e->spectator ? "  (spectator)" : "");
 			DrawQ_String(x + size * 0.4f, y + i * rowh + (rowh - size) * 0.5f, label, 0, size, size,
 				1, 1, 1, 1, 0, NULL, true, FONT_CHAT);

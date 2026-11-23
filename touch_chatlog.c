@@ -44,7 +44,11 @@ static cvar_t touch_chatlog_rect = {CF_CLIENT, "_touch_chatlog_rect", "",
 
 static tcl_log_t cl_log;
 static char tcl_pending_lead;
-static int tcl_scroll;      /* lines back from the newest; 0 is the live feed */
+static float tcl_off;       /* pixels (screen units) the log is pulled down from the live state; 0 is the live feed */
+static float tcl_vel;       /* momentum, screen units per second */
+static double tcl_last_frame;
+static float tcl_line_h = 12;
+static int tcl_icon_px;     /* side of the icon art as last made, in device pixels */
 static double tcl_scroll_time;
 static int tcl_box_lines = 2;
 static float tcl_ix[TCL_ICONS], tcl_iy, tcl_isz; /* slot 0 share, 1 download, 2 copy, 3 clear */
@@ -67,8 +71,7 @@ void TouchChatLog_Line(const char *line)
 		return;
 	/* the printer prefixes "^7^3"; the text follows */
 	TouchChatLog_Add(&cl_log, host.realtime, time(NULL), line);
-	if (tcl_scroll) /* keep the same lines under the finger */
-		tcl_scroll++;
+	tcl_off = TouchChatLog_PinAdjust(tcl_off, tcl_line_h); /* pinned to the newest unless scrolled up */
 }
 
 /* The stock notify area (chat lines too when the chat area is off) hides what the clear emptied. */
@@ -96,14 +99,15 @@ float TouchChatLog_Fade(float stock)
 	stock = TouchChatLog_NotifyFade(stock);
 	if (!touch_chatlog.integer)
 		return stock;
-	if (tcl_scroll > 0)
+	if (tcl_off > 0.5f)
 		return 0.0001f; /* the scrolled view replaces the live feed */
 	return touch_chatlog_fade.value > 0 ? TouchChatLog_FadeAfterClear(touch_chatlog_fade.value, cl.time, tcl_cleared_at) : stock;
 }
 
 static void TCL_Scroll(int delta)
 {
-	tcl_scroll = TouchChatLog_ClampScroll(&cl_log, tcl_scroll + delta, tcl_box_lines);
+	tcl_off = TouchChatLog_ClampPx(&cl_log, tcl_off + (float)delta * tcl_line_h, tcl_box_lines, tcl_line_h);
+	tcl_vel = 0;
 	tcl_scroll_time = host.realtime;
 }
 
@@ -147,11 +151,31 @@ static void TCL_Scroll_f(cmd_state_t *cmd)
 		TCL_Scroll(atoi(Cmd_Argv(cmd, 1)));
 }
 
+/* touch_chatlog_drag <fraction of the screen height>: a finger moved that far down (older lines come
+ * into view; negative goes back). It also stops any coasting, so a drag of 0 is a touch-down. */
+static void TCL_Drag_f(cmd_state_t *cmd)
+{
+	if (Cmd_Argc(cmd) < 2)
+		return;
+	tcl_off = TouchChatLog_ClampPx(&cl_log, tcl_off + (float)atof(Cmd_Argv(cmd, 1)) * vid_conheight.value, tcl_box_lines, tcl_line_h);
+	tcl_vel = 0;
+	tcl_scroll_time = host.realtime;
+}
+
+/* touch_chatlog_fling <screen heights per second>: the finger lifted at that speed; the log coasts on. */
+static void TCL_Fling_f(cmd_state_t *cmd)
+{
+	if (Cmd_Argc(cmd) < 2)
+		return;
+	tcl_vel = (float)atof(Cmd_Argv(cmd, 1)) * vid_conheight.value;
+	tcl_scroll_time = host.realtime;
+}
+
 static void TCL_Clear_f(cmd_state_t *cmd)
 {
 	(void)cmd;
 	TouchChatLog_Clear(&cl_log);
-	tcl_scroll = 0;
+	tcl_off = tcl_vel = 0;
 	tcl_scroll_time = host.realtime;
 	tcl_cleared_at = cl.time;
 	Con_Printf("chat log cleared\n");
@@ -247,6 +271,8 @@ void TouchChatLog_Init(void)
 	Cvar_RegisterVariable(&touch_chatlog_fade);
 	Cvar_RegisterVariable(&touch_chatlog_rect);
 	Cmd_AddCommand(CF_CLIENT, "touch_chatlog_scroll", TCL_Scroll_f, "touch_chatlog_scroll <lines>: scroll the chat log back (positive) or forward");
+	Cmd_AddCommand(CF_CLIENT, "touch_chatlog_drag", TCL_Drag_f, "touch_chatlog_drag <screen heights>: pixel scroll of the chat log by a finger (positive shows older lines)");
+	Cmd_AddCommand(CF_CLIENT, "touch_chatlog_fling", TCL_Fling_f, "touch_chatlog_fling <screen heights per second>: let the chat log coast after a flick");
 	Cmd_AddCommand(CF_CLIENT, "touch_chatlog_clear", TCL_Clear_f, "empty the chat log and the chat lines on show");
 	Cmd_AddCommand(CF_CLIENT, "touch_chatlog_export", TCL_Export_f, "save the chat log as text (share sheet and Downloads on Android, ~/Downloads elsewhere)");
 	Cmd_AddCommand(CF_CLIENT, "touch_chatlog_share", TCL_Share_f, "open the share sheet with the chat log (Android)");
@@ -254,91 +280,136 @@ void TouchChatLog_Init(void)
 	Cmd_AddCommand(CF_CLIENT, "touch_chatlog_copy", TCL_Copy_f, "put the chat log text on the clipboard");
 }
 
+/* The icon art at the screen's real pixel size (see TouchChatLog_IconRaster), kept as pixels and
+ * redone only when the size changes. It is drawn as runs of equal pixels (DrawQ_Fill on the device
+ * pixel grid), so it is crisp whatever the renderer does with textures and costs a few dozen quads. */
+static unsigned char tcl_icon_pix[TCL_ICONS][128 * 128 * 4];
+
+static void TCL_MakeIcons(int px)
+{
+	int k;
+	if (px > 128)
+		px = 128;
+	if (px < 8)
+		px = 8;
+	if (px == tcl_icon_px)
+		return;
+	for (k = 0; k < TCL_ICONS; k++)
+		TouchChatLog_IconRaster(k, px, tcl_icon_pix[k]);
+	tcl_icon_px = px;
+}
+
+static void TCL_DrawIcon(int k, float x, float y, float pxs, float alpha)
+{
+	int px = tcl_icon_px, row, col;
+	const unsigned char *p = tcl_icon_pix[k];
+	for (row = 0; row < px; row++)
+	{
+		col = 0;
+		while (col < px)
+		{
+			const unsigned char *c = p + ((size_t)row * px + col) * 4;
+			int run = 1;
+			if (c[3] == 0)
+			{
+				col++;
+				continue;
+			}
+			while (col + run < px && !memcmp(c, c + (size_t)run * 4, 4))
+				run++;
+			DrawQ_Fill(x + (float)col / pxs, y + (float)row / pxs, (float)run / pxs, 1.0f / pxs,
+				c[2] / 255.0f, c[1] / 255.0f, c[0] / 255.0f, c[3] / 255.0f * alpha, 0);
+			col += run;
+		}
+	}
+}
+
 void TouchChatLog_Draw(float x, float y, float w, float size, int stock_lines)
 {
 	unsigned visible;
-	int lines, i, maxl = stock_lines > 0 ? stock_lines : 8;
+	int lines, i, maxl = stock_lines > 0 ? stock_lines : 8, show;
+	float dt, maxoff;
 	char rect[320];
 	if (!touch_chatlog.integer || cls.state != ca_connected || size <= 0)
 		return;
-	if (tcl_scroll && host.realtime - tcl_scroll_time > 20)
-		tcl_scroll = 0; /* nobody is reading back: return to the live feed */
+	dt = tcl_last_frame > 0 ? (float)(host.realtime - tcl_last_frame) : 0;
+	tcl_last_frame = host.realtime;
+	if (dt > 0.1f)
+		dt = 0.1f;
+	tcl_line_h = size;
+	if (tcl_off > 0 && host.realtime - tcl_scroll_time > 20)
+		tcl_off = tcl_vel = 0; /* nobody is reading back: return to the live feed */
 	visible = TouchChatLog_Visible(&cl_log, host.realtime, touch_chatlog_fade.value > 0 ? touch_chatlog_fade.value : 15);
 	lines = TouchChatLog_BoxLines(visible, 2, maxl);
 	tcl_box_lines = lines;
-	tcl_scroll = TouchChatLog_ClampScroll(&cl_log, tcl_scroll, lines);
+	maxoff = TouchChatLog_MaxPx(&cl_log, lines, size);
+	if (tcl_vel != 0 && TouchChatLog_Coast(&tcl_off, &tcl_vel, dt, maxoff))
+		tcl_scroll_time = host.realtime;
+	tcl_off = TouchChatLog_ClampPx(&cl_log, tcl_off, lines, size);
 	/* the stock chat area draws its lines bottom-aligned in a rect of maxl lines:
 	 * the box, its icons and the scrolled view sit on those lines, not on the rect's top */
 	y += (float)(max(maxl, lines) - lines) * size;
 
-	/* four plain outline icons, one size, evenly spaced in a row docked just above
-	 * the box's first line, from the chat text's x: clear, copy, download, share */
-	tcl_isz = size * 1.6f;
-	for (i = 0; i < TCL_ICONS; i++)
-		tcl_ix[i] = TouchChatLog_IconX(x, w, tcl_isz, i);
-	tcl_iy = max(0.0f, y - tcl_isz - 1);
+	/* four icons, one size, evenly spaced in a row docked just above the box's first line, from
+	 * the chat text's x: clear, copy, download, share. Only while the log holds a line. The art is
+	 * made at the screen's own pixel size and drawn 1:1 on the pixel grid. */
+	show = TouchChatLog_IconsShown(&cl_log) && vid.mode.width > 0 && vid_conwidth.value > 0;
+	if (show)
 	{
-		float a = tcl_scroll ? 0.9f : 0.5f, s = tcl_isz, t = max(1.0f, s * 0.07f);
+		float pxs = (float)vid.mode.width / vid_conwidth.value; /* device pixels per screen unit */
+		int px = (int)(size * 1.6f * pxs + 0.5f);
+		float a = tcl_off > 0.5f ? 0.95f : 0.6f;
+		float sz;
+		TCL_MakeIcons(px);
+		sz = (float)tcl_icon_px / pxs;
+		tcl_isz = sz;
 		for (i = 0; i < TCL_ICONS; i++)
-		{
-			float ix = tcl_ix[i], iy = tcl_iy;
-			DrawQ_Fill(ix, iy, s, s, 0.02f, 0.04f, 0.08f, a * 0.6f, 0);
-			switch (i)
-			{
-			case 0: /* share: three linked dots */
-				DrawQ_Fill(ix + s * 0.2f, iy + s * 0.4f, s * 0.2f, s * 0.2f, 1, 1, 1, a, 0);
-				DrawQ_Fill(ix + s * 0.6f, iy + s * 0.15f, s * 0.2f, s * 0.2f, 1, 1, 1, a, 0);
-				DrawQ_Fill(ix + s * 0.6f, iy + s * 0.65f, s * 0.2f, s * 0.2f, 1, 1, 1, a, 0);
-				DrawQ_Line(1, ix + s * 0.3f, iy + s * 0.5f, ix + s * 0.7f, iy + s * 0.25f, 1, 1, 1, a, 0);
-				DrawQ_Line(1, ix + s * 0.3f, iy + s * 0.5f, ix + s * 0.7f, iy + s * 0.75f, 1, 1, 1, a, 0);
-				break;
-			case 1: /* download: an arrow down into a tray */
-				DrawQ_Fill(ix + s * 0.47f, iy + s * 0.18f, t, s * 0.38f, 1, 1, 1, a, 0);
-				DrawQ_Line(1, ix + s * 0.3f, iy + s * 0.42f, ix + s * 0.5f, iy + s * 0.62f, 1, 1, 1, a, 0);
-				DrawQ_Line(1, ix + s * 0.5f, iy + s * 0.62f, ix + s * 0.7f, iy + s * 0.42f, 1, 1, 1, a, 0);
-				DrawQ_Fill(ix + s * 0.22f, iy + s * 0.74f, s * 0.56f, t, 1, 1, 1, a, 0);
-				break;
-			case 2: /* copy: two overlapping outline pages */
-				DrawQ_Fill(ix + s * 0.22f, iy + s * 0.22f, s * 0.32f, t, 1, 1, 1, a, 0);
-				DrawQ_Fill(ix + s * 0.22f, iy + s * 0.22f, t, s * 0.4f, 1, 1, 1, a, 0);
-				DrawQ_Fill(ix + s * 0.22f, iy + s * 0.62f, s * 0.12f, t, 1, 1, 1, a, 0);
-				DrawQ_Fill(ix + s * 0.44f, iy + s * 0.38f, s * 0.34f, t, 1, 1, 1, a, 0);
-				DrawQ_Fill(ix + s * 0.44f, iy + s * 0.38f, t, s * 0.4f, 1, 1, 1, a, 0);
-				DrawQ_Fill(ix + s * 0.44f, iy + s * 0.78f, s * 0.34f + t, t, 1, 1, 1, a, 0);
-				DrawQ_Fill(ix + s * 0.78f, iy + s * 0.38f, t, s * 0.4f, 1, 1, 1, a, 0);
-				break;
-			default: /* clear: a bin, lid and handle above a body with two slots */
-				DrawQ_Fill(ix + s * 0.38f, iy + s * 0.14f, s * 0.24f, t, 1, 1, 1, a, 0);
-				DrawQ_Fill(ix + s * 0.2f, iy + s * 0.24f, s * 0.6f, t, 1, 1, 1, a, 0);
-				DrawQ_Fill(ix + s * 0.28f, iy + s * 0.34f, t, s * 0.44f, 1, 1, 1, a, 0);
-				DrawQ_Fill(ix + s * 0.72f - t, iy + s * 0.34f, t, s * 0.44f, 1, 1, 1, a, 0);
-				DrawQ_Fill(ix + s * 0.28f, iy + s * 0.78f, s * 0.44f, t, 1, 1, 1, a, 0);
-				DrawQ_Fill(ix + s * 0.43f, iy + s * 0.42f, t, s * 0.28f, 1, 1, 1, a, 0);
-				DrawQ_Fill(ix + s * 0.57f, iy + s * 0.42f, t, s * 0.28f, 1, 1, 1, a, 0);
-				break;
-			}
-		}
+			tcl_ix[i] = floorf(TouchChatLog_IconX(x, w, sz, i) * pxs + 0.5f) / pxs;
+		tcl_iy = floorf(max(0.0f, y - sz - 1) * pxs + 0.5f) / pxs;
+		for (i = 0; i < TCL_ICONS; i++)
+			TCL_DrawIcon(i, tcl_ix[i], tcl_iy, pxs, a);
 		if (host.realtime - tcl_copied_at < 1.5)
-			DrawQ_String(tcl_ix[2] - s * 0.4f, tcl_iy - size - 2, "Copied", 0, size, size, 0.6f, 1, 0.6f, 1, 0, NULL, false, FONT_CHAT);
+			DrawQ_String(tcl_ix[2] - sz * 0.4f, tcl_iy - size - 2, "Copied", 0, size, size, 0.6f, 1, 0.6f, 1, 0, NULL, false, FONT_CHAT);
 	}
-	/* rect: box, share icon, lineh, then clear, copy, download (fields are only appended) */
-	dpsnprintf(rect, sizeof(rect), "%.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f",
-		x / vid_conwidth.value, y / vid_conheight.value, w / vid_conwidth.value, lines * size / vid_conheight.value,
-		tcl_ix[0] / vid_conwidth.value, tcl_iy / vid_conheight.value, tcl_isz / vid_conwidth.value, tcl_isz / vid_conheight.value, size / vid_conheight.value,
-		tcl_ix[3] / vid_conwidth.value, tcl_iy / vid_conheight.value, tcl_isz / vid_conwidth.value, tcl_isz / vid_conheight.value,
-		tcl_ix[2] / vid_conwidth.value, tcl_iy / vid_conheight.value, tcl_isz / vid_conwidth.value, tcl_isz / vid_conheight.value,
-		tcl_ix[1] / vid_conwidth.value, tcl_iy / vid_conheight.value, tcl_isz / vid_conwidth.value, tcl_isz / vid_conheight.value);
+	else
+	{
+		tcl_isz = 0;
+		for (i = 0; i < TCL_ICONS; i++)
+			tcl_ix[i] = -10000;
+		tcl_iy = -10000;
+	}
+	/* rect: box, share icon, lineh, then clear, copy, download (fields are only appended); an icon
+	 * that is not shown is published off the screen, with no size, so nothing can hit it */
+	{
+		float is = tcl_isz, ix[TCL_ICONS], iy = tcl_iy;
+		for (i = 0; i < TCL_ICONS; i++)
+			ix[i] = show ? tcl_ix[i] : -1;
+		if (!show)
+			iy = -1;
+		dpsnprintf(rect, sizeof(rect), "%.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f",
+			x / vid_conwidth.value, y / vid_conheight.value, w / vid_conwidth.value, lines * size / vid_conheight.value,
+			ix[0] / vid_conwidth.value, iy / vid_conheight.value, is / vid_conwidth.value, is / vid_conheight.value, size / vid_conheight.value,
+			ix[3] / vid_conwidth.value, iy / vid_conheight.value, is / vid_conwidth.value, is / vid_conheight.value,
+			ix[2] / vid_conwidth.value, iy / vid_conheight.value, is / vid_conwidth.value, is / vid_conheight.value,
+			ix[1] / vid_conwidth.value, iy / vid_conheight.value, is / vid_conwidth.value, is / vid_conheight.value);
+	}
 	if (strcmp(touch_chatlog_rect.string, rect))
 		Cvar_SetQuick(&touch_chatlog_rect, rect);
 
-	if (!tcl_scroll)
+	if (tcl_off <= 0.5f)
 		return; /* the engine draws the live feed */
+	/* the scrolled view: only the rows that touch the box are drawn, clipped to it, at a pixel offset */
 	DrawQ_Fill(x, y, w, lines * size, 0.02f, 0.04f, 0.08f, 0.7f, 0);
-	for (i = 0; i < lines; i++)
 	{
-		int idx = (int)cl_log.count - tcl_scroll - lines + i;
-		const tcl_entry_t *e = idx >= 0 ? TouchChatLog_Get(&cl_log, (unsigned)idx) : NULL;
-		if (e)
-			DrawQ_String(x, y + i * size, e->text, 0, size, size, 1, 1, 1, 1, 0, NULL, false, FONT_CHAT);
+		tcl_window_t win = TouchChatLog_Window(cl_log.count, lines, tcl_off, size);
+		int m;
+		DrawQ_SetClipArea(x, y, w, lines * size);
+		for (m = win.mfirst; m <= win.mlast; m++)
+		{
+			const tcl_entry_t *e = TouchChatLog_Get(&cl_log, (unsigned)(win.j0 + m));
+			if (e)
+				DrawQ_String(x, y + (float)m * size + win.frac, e->text, 0, size, size, 1, 1, 1, 1, 0, NULL, false, FONT_CHAT);
+		}
+		DrawQ_ResetClipArea();
 	}
 }

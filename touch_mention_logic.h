@@ -106,21 +106,55 @@ static inline int TouchMention_Filter(const char *const *names, int count,
 	return n;
 }
 
-// Replace "@query" (from the @ to the cursor) with "@name ". Returns the new
-// cursor, or -1 when it would not fit in size bytes.
+// Replace "@query" (from the @ to the cursor) with "@name ": the full name
+// (colour codes stripped) and exactly one space after it, then the cursor after
+// that space. When the text after the cursor already starts with a space it is
+// used as that space (no double space). Returns the new cursor, or -1 when it
+// would not fit in size bytes or the cursor is not inside an @ token.
 static inline int TouchMention_Insert(char *text, size_t size, int at, int cursor,
 	const char *name)
 {
-	size_t len = strlen(text), nlen = strlen(name);
-	size_t tail = len - (size_t)cursor;
-	size_t newlen = (size_t)at + 1 + nlen + 1 + tail;
-	if (at < 0 || cursor < at + 1 || (size_t)cursor > len || newlen + 1 > size)
+	char plain[TM_MAX_NAME * 2];
+	size_t len = strlen(text), nlen, tail, skip, newlen;
+	TouchMention_StripColors(name, plain, sizeof(plain));
+	nlen = strlen(plain);
+	if (at < 0 || cursor < at + 1 || (size_t)cursor > len)
 		return -1;
-	memmove(text + at + 1 + nlen + 1, text + cursor, tail + 1);
+	tail = len - (size_t)cursor;
+	skip = (tail && text[cursor] == ' ') ? 1 : 0; // the space is already there
+	newlen = (size_t)at + 1 + nlen + 1 + (tail - skip);
+	if (newlen + 1 > size)
+		return -1;
+	memmove(text + at + 1 + nlen + 1, text + cursor + skip, tail - skip + 1);
 	text[at] = '@';
-	memcpy(text + at + 1, name, nlen);
+	memcpy(text + at + 1, plain, nlen);
 	text[at + 1 + nlen] = ' ';
 	return (int)(at + 1 + nlen + 1);
+}
+
+// Where the @ list goes, as a top y. Preferably BELOW the chat input (the chat
+// wedge sits at the top of the screen): below_start is where the space under
+// the input begins, limit the lowest y the list may reach (the screen's bottom,
+// or the on-screen keyboard's top). Only when it does not fit there does it go
+// above the input (input_top - list_h), and failing that it is pushed onto the
+// screen below. *below tells which side was used.
+static inline float TouchMention_ListY(float input_top, float below_start, float list_h,
+	float limit, int *below)
+{
+	float y;
+	if (below_start + list_h <= limit)
+	{
+		*below = 1;
+		return below_start;
+	}
+	if (input_top - list_h >= 0)
+	{
+		*below = 0;
+		return input_top - list_h;
+	}
+	*below = 1;
+	y = limit - list_h;
+	return y < 0 ? 0 : y;
 }
 
 // Does msg mention name: "@name" in any case, not followed by more of a word,
