@@ -1276,6 +1276,8 @@ static void fe_menu(cmd_state_t *cmd)
 		Cbuf_AddText(cmd_local, "\ntogglemenu 0\n");
 	else if (!strcmp(what, "leave"))
 		Cbuf_AddText(cmd_local, "\ndisconnect\ntogglemenu 1\n"); // the (hidden) menu open again, as after any disconnect
+	else if (!strcmp(what, "chatlog"))
+		Cbuf_AddText(cmd_local, "\ntouch_chatlog_open\ntogglemenu 0\n"); // as the QuakeC pause menu's Chat log
 	else if (!strcmp(what, "quit"))
 		Cbuf_AddText(cmd_local, "\nquit\n");
 	else if (!strcmp(what, "console"))

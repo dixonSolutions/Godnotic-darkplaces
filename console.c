@@ -2036,7 +2036,7 @@ void Con_DrawNotify (void)
 	if (key_dest == key_message)
 	{
 		inputsize = (numChatlines ? con_chatsize : con_notifysize).value;
-		if (!(vid_touchscreen.integer && scr_numtouchscreenareas > 0)) Con_DrawInput(false, x, v, inputsize); // Touch: the touch overlay draws it at the top
+		if (!(vid_touchscreen.integer && scr_numtouchscreenareas > 0) && !TouchChatLog_PanelHasInput()) Con_DrawInput(false, x, v, inputsize); // Touch: the touch overlay or the open chat log draws it
 	}
 	else
 		chat_bufferpos = 0;

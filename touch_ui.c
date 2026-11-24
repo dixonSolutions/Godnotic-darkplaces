@@ -13,6 +13,7 @@
 #include "touch_spectate.h"
 #include "csprogs.h"
 #include "touch_ui.h"
+#include "touch_hud.h"
 #include "touch_shellbtn.h"
 #include "draw.h"
 #include "ft2.h"
@@ -91,7 +92,7 @@ static double touchui_console_keys_time;
  * Linux launcher's measurement, or a phone-sized guess -- the same sources,
  * in the same order, as the menu's size (touch_menu_scale.qc).
  */
-static float TouchUI_ConPerDp(void)
+float TouchUI_ConPerDp(void)
 {
 	float density = 0, l, t, r, b;
 	cvar_t *v = Cvar_FindVar(&cvars_all, "_touch_safe_insets", ~0);
@@ -131,6 +132,13 @@ float TouchUI_SheetHeaderHeight(float h)
 {
 	float hdr_h = bound(36.0f, h * 0.10f, 64.0f);
 	return min(max(hdr_h, 48.0f * TouchUI_ConPerDp()), h * 0.16f);
+}
+
+/* The KEYBOARD toggle of the mouse sheet (touch controls off); hung 8 under
+ * the top of the screen over the chat line. */
+float TouchUI_MouseToggleHeight(float h)
+{
+	return bound(28.0f, h * 0.06f, 44.0f);
 }
 
 float TouchUI_ChatInputTop(float height)
@@ -1283,7 +1291,7 @@ static int TouchUI_LayoutMouseSheet(touchui_sheet_t kind, float x, float y, floa
 {
 	int n = 0;
 	qbool keys = TouchUI_KeysShown(kind);
-	float bh = bound(28.0f, h * 0.06f, 44.0f);
+	float bh = TouchUI_MouseToggleHeight(h);
 	float bw = bh * 4.0f;
 	float kb_h = TouchUI_KeysHeight(w, h, 0, bound(0.28f, touch_kb_height.value, 0.70f));
 
@@ -1306,7 +1314,7 @@ static int TouchUI_LayoutMouseSheet(touchui_sheet_t kind, float x, float y, floa
 	if (keys)
 		by = min(by, y + h - kb_h - bh - 6.0f);
 	by = bound(y, by, y + h - bh);
-	TouchUI_PushItem(out, &n, maxout, x + w - bw - 8.0f, by, bw, bh,
+	TouchUI_PushItem(out, &n, maxout, kind == TOUCHUI_SHEET_CHAT ? max(x, x + w * 0.86f - bw - 8.0f) : x + w - bw - 8.0f, by, bw, bh,
 		keys ? "HIDE KEYS" : "KEYBOARD", bh * 0.42f, TOUCHUI_STYLE_GLASS, TOUCHUI_ACT_KB_TOGGLE, 0);
 	if (kind == TOUCHUI_SHEET_CONSOLE) /* CLEAR beside it: the stock clear command */
 		TouchUI_PushItem(out, &n, maxout, x + w - bw - 8.0f - bw * 0.6f - 6.0f, by, bw * 0.6f, bh,
@@ -1682,6 +1690,10 @@ void TouchUI_DrawGlassItem(const touchui_item_t *it, float pressed, float opacit
 				TOUCHUI_ACCENT_R * 0.55f, TOUCHUI_ACCENT_G * 0.65f, TOUCHUI_ACCENT_B * 0.85f, 1.0f, 0);
 		else
 			DrawQ_Fill(it->x + 1, it->y + 1, it->w - 2, it->h - 2, 0.16f, 0.20f, 0.27f, 1.0f, 0);
+	}
+	else if (it->style == TOUCHUI_STYLE_GLASS && (!strcmp(it->label, "KEYBOARD") || !strcmp(it->label, "HIDE KEYS")))
+	{
+		TouchHUD_GlassControl(it->x + it->w * 0.5f, it->y + it->h * 0.5f, it->w * 0.5f, it->h * 0.5f, pressed > 0, false, a);
 	}
 	else if (it->style != TOUCHUI_STYLE_TEXT)
 	{

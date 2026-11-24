@@ -1136,7 +1136,7 @@ qbool Font_GetKerningForMap(ft2_font_t *font, int map_index, float w, float h, U
 		}
 		ul = qFT_Get_Char_Index((FT_Face)font->face, left);
 		ur = qFT_Get_Char_Index((FT_Face)font->face, right);
-		if (qFT_Get_Kerning((FT_Face)font->face, ul, ur, FT_KERNING_DEFAULT, &kernvec))
+		if (ul && ur && !qFT_Get_Kerning((FT_Face)font->face, ul, ur, FT_KERNING_DEFAULT, &kernvec))
 		{
 			if (outx) *outx = Font_SnapTo(kernvec.x * fmap->sfx, 1 / fmap->size);// * (w / (float)fmap->size);
 			if (outy) *outy = Font_SnapTo(kernvec.y * fmap->sfy, 1 / fmap->size);// * (h / (float)fmap->size);
@@ -1642,14 +1642,14 @@ static qbool Font_LoadMap(ft2_font_t *font, ft2_font_map_t *mapstart, Uchar _ch,
 		}
 		//status = qFT_Load_Char(face, ch, FT_LOAD_RENDER);
 		// we need the glyphIndex
-		face = (FT_Face)font->face;
+		face = (FT_Face)(font->image_font ? font->next->face : font->face); // Touch: image fonts have no FreeType face
 		usefont = NULL;
 		if (font->image_font && mapch == ch && img_fontmap[mapch])
 		{
 			map->glyphs[mapch].image = true;
-			continue;
+			goto next_glyph; // Touch: advance the atlas slot for image glyphs too
 		}
-		glyphIndex = qFT_Get_Char_Index(face, ch);
+		glyphIndex = font->image_font ? 0 : qFT_Get_Char_Index(face, ch);
 		if (glyphIndex == 0)
 		{
 			// by convention, 0 is the "missing-glyph"-glyph
@@ -1672,21 +1672,23 @@ static qbool Font_LoadMap(ft2_font_t *font, ft2_font_map_t *mapstart, Uchar _ch,
 			{
 				//Con_Printf("failed to load fallback glyph for char %lx from font %s\n", (unsigned long)ch, font->name);
 				// now we let it use the "missing-glyph"-glyph
-				face = (FT_Face)font->face;
+				face = (FT_Face)(font->image_font ? font->next->face : font->face);
 				glyphIndex = 0;
 			}
 		}
 
 		if (!usefont)
 		{
-			usefont = font;
-			face = (FT_Face)font->face;
+			usefont = font->image_font ? font->next : font; // Touch: use fallback .notdef for missing glyphs
+			face = (FT_Face)usefont->face;
+			Font_SetSize(usefont, mapstart->intSize, mapstart->intSize);
 			status = qFT_Load_Glyph(face, glyphIndex, FT_LOAD_RENDER | load_flags);
 			if (status)
 			{
 				//Con_Printf("failed to load glyph %lu for %s\n", glyphIndex, font->name);
 				Con_DPrintf("failed to load glyph for char %lx from font %s\n", (unsigned long)ch, font->name);
-				continue;
+				map->glyphs[mapch].advance_x = 0.5f; // Touch: keep a failed glyph from stalling the map
+				goto next_glyph;
 			}
 		}
 
@@ -1698,10 +1700,8 @@ static qbool Font_LoadMap(ft2_font_t *font, ft2_font_map_t *mapstart, Uchar _ch,
 
 		if (w > (map->glyphSize - gpad_l - gpad_r) || h > (map->glyphSize - gpad_t - gpad_b)) {
 			Con_Printf(CON_WARN "WARNING: Glyph %lu is too big in font %s, size %g: %i x %i\n", ch, font->name, map->size, w, h);
-			if (w > map->glyphSize)
-				w = map->glyphSize - gpad_l - gpad_r;
-			if (h > map->glyphSize)
-				h = map->glyphSize;
+			w = min(w, map->glyphSize - gpad_l - gpad_r); // Touch: never write into the next atlas cell
+			h = min(h, map->glyphSize - gpad_t - gpad_b);
 		}
 
 		if (imagedata)
@@ -1736,53 +1736,18 @@ static qbool Font_LoadMap(ft2_font_t *font, ft2_font_map_t *mapstart, Uchar _ch,
 				dst = imagedata + y * pitch;
 				src = bmp->buffer + y * bmp->pitch;
 
-				switch (bmp->pixel_mode)
+				// Touch: copy exactly the visible width, including packed end bytes.
+				for (x = 0; x < w; ++x)
 				{
-				case FT_PIXEL_MODE_MONO:
-					dst += bytes_per_pixel - 1; // shift to alpha byte
-					for (x = 0; x < bmp->width; x += 8)
+					unsigned char value = 0;
+					switch (bmp->pixel_mode)
 					{
-						unsigned char c = *src++;
-						*dst = 255 * !!((c & 0x80) >> 7); dst += bytes_per_pixel;
-						*dst = 255 * !!((c & 0x40) >> 6); dst += bytes_per_pixel;
-						*dst = 255 * !!((c & 0x20) >> 5); dst += bytes_per_pixel;
-						*dst = 255 * !!((c & 0x10) >> 4); dst += bytes_per_pixel;
-						*dst = 255 * !!((c & 0x08) >> 3); dst += bytes_per_pixel;
-						*dst = 255 * !!((c & 0x04) >> 2); dst += bytes_per_pixel;
-						*dst = 255 * !!((c & 0x02) >> 1); dst += bytes_per_pixel;
-						*dst = 255 * !!((c & 0x01) >> 0); dst += bytes_per_pixel;
+					case FT_PIXEL_MODE_MONO: value = (src[x / 8] & (0x80 >> (x % 8))) ? 255 : 0; break;
+					case FT_PIXEL_MODE_GRAY2: value = ((src[x / 4] >> (6 - 2 * (x % 4))) & 3) * 85; break;
+					case FT_PIXEL_MODE_GRAY4: value = ((src[x / 2] >> (4 - 4 * (x % 2))) & 15) * 17; break;
+					case FT_PIXEL_MODE_GRAY: value = src[x]; break;
 					}
-					break;
-				case FT_PIXEL_MODE_GRAY2:
-					dst += bytes_per_pixel - 1; // shift to alpha byte
-					for (x = 0; x < bmp->width; x += 4)
-					{
-						unsigned char c = *src++;
-						*dst = ( ((c & 0xA0) >> 6) * 0x55 ); c <<= 2; dst += bytes_per_pixel;
-						*dst = ( ((c & 0xA0) >> 6) * 0x55 ); c <<= 2; dst += bytes_per_pixel;
-						*dst = ( ((c & 0xA0) >> 6) * 0x55 ); c <<= 2; dst += bytes_per_pixel;
-						*dst = ( ((c & 0xA0) >> 6) * 0x55 ); c <<= 2; dst += bytes_per_pixel;
-					}
-					break;
-				case FT_PIXEL_MODE_GRAY4:
-					dst += bytes_per_pixel - 1; // shift to alpha byte
-					for (x = 0; x < bmp->width; x += 2)
-					{
-						unsigned char c = *src++;
-						*dst = ( ((c & 0xF0) >> 4) * 0x11); dst += bytes_per_pixel;
-						*dst = ( ((c & 0x0F) ) * 0x11); dst += bytes_per_pixel;
-					}
-					break;
-				case FT_PIXEL_MODE_GRAY:
-					// in this case pitch should equal width
-					for (tp = 0; tp < bmp->pitch; ++tp)
-						dst[(bytes_per_pixel - 1) + tp*bytes_per_pixel] = src[tp]; // copy the grey value into the alpha bytes
-
-					//memcpy((void*)dst, (void*)src, bmp->pitch);
-					//dst += bmp->pitch;
-					break;
-				default:
-					break;
+					dst[x * bytes_per_pixel + bytes_per_pixel - 1] = value;
 				}
 			}
 
@@ -1816,17 +1781,17 @@ static qbool Font_LoadMap(ft2_font_t *font, ft2_font_map_t *mapstart, Uchar _ch,
 			//double mHeight = (glyph->metrics.height >> 6) / map->size;
 
 			mapglyph->txmin = ( (double)(glyph_column * map->glyphSize) + (double)(gpad_l - pad_l) ) / ( (double)(map->glyphSize * chars_per_line) );
-			mapglyph->txmax = mapglyph->txmin + (double)(bmp->width + pad_l + pad_r) / ( (double)(map->glyphSize * chars_per_line) );
+			mapglyph->txmax = mapglyph->txmin + (double)(w + pad_l + pad_r) / ( (double)(map->glyphSize * chars_per_line) );
 			mapglyph->tymin = ( (double)(glyph_row * map->glyphSize) + (double)(gpad_r - pad_r) ) / ( (double)(map->glyphSize * char_lines) );
-			mapglyph->tymax = mapglyph->tymin + (double)(bmp->rows + pad_t + pad_b) / ( (double)(map->glyphSize * char_lines) );
+			mapglyph->tymax = mapglyph->tymin + (double)(h + pad_t + pad_b) / ( (double)(map->glyphSize * char_lines) );
 			//mapglyph->vxmin = bearingX;
 			//mapglyph->vxmax = bearingX + mWidth;
 			mapglyph->vxmin = (glyph->bitmap_left - pad_l) / map->size;
-			mapglyph->vxmax = mapglyph->vxmin + (bmp->width + pad_l + pad_r) / map->size; // don't ask
+			mapglyph->vxmax = mapglyph->vxmin + (w + pad_l + pad_r) / map->size; // don't ask
 			//mapglyph->vymin = -bearingY;
 			//mapglyph->vymax = mHeight - bearingY;
 			mapglyph->vymin = (-glyph->bitmap_top - pad_t) / map->size;
-			mapglyph->vymax = mapglyph->vymin + (bmp->rows + pad_t + pad_b) / map->size;
+			mapglyph->vymax = mapglyph->vymin + (h + pad_t + pad_b) / map->size;
 			//Con_Printf("dpi = %f %f (%f %d) %d %d\n", bmp->width / (mapglyph->vxmax - mapglyph->vxmin), bmp->rows / (mapglyph->vymax - mapglyph->vymin), map->size, map->glyphSize, (int)fontface->size->metrics.x_ppem, (int)fontface->size->metrics.y_ppem);
 			//mapglyph->advance_x = advance * usefont->size;
 			//mapglyph->advance_x = advance;
@@ -1850,6 +1815,7 @@ static qbool Font_LoadMap(ft2_font_t *font, ft2_font_map_t *mapstart, Uchar _ch,
 		}
 		map->glyphs[mapch].image = false;
 
+		next_glyph: // Touch: image and failed glyphs occupy a slot as well
 		++mapch; ++ch;
 		if ((int)mapch == chars_per_map)
 			break;

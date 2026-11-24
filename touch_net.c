@@ -1565,6 +1565,22 @@ static void TouchNet_Status_f(cmd_state_t *cmd)
 			t->fastretransmits, t->timeouts, t->heldahead, t->dupdata, t->rate, (t->conn->cleartime - host.realtime) * 1000.0, t->conn->nq.receiveSequence, t->base);
 }
 
+size_t TouchNet_CopyPlayerBlock(char *dst, size_t size, const char *src)
+{
+	size_t n = strlen(src);
+	if (!size)
+		return 0;
+	if (n >= size)
+	{
+		n = size - 1;
+		while (n > 0 && src[n - 1] != '\n')
+			n--; // whole lines only
+	}
+	memcpy(dst, src, n);
+	dst[n] = 0;
+	return n;
+}
+
 void TouchNet_Init(void)
 {
 	Cvar_RegisterVariable(&net_reliable_window);

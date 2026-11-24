@@ -156,6 +156,7 @@ void TouchUI_PositionChatLog(float *x, float *y);
 float TouchUI_ConsoleHeight(float con_h);
 /* Height of the console / chat sheet's header row, sheet units. */
 float TouchUI_SheetHeaderHeight(float h);
+float TouchUI_MouseToggleHeight(float h);
 
 /* Current interactive state */
 touchui_tab_t TouchUI_GetTab(void);
@@ -187,5 +188,8 @@ void TouchUI_ResetInputState(void);
 #define TOUCHUI_DANGER_B  0.22f
 
 void TouchUI_DrawGlassItem(const touchui_item_t *it, float pressed, float opacity);
+
+/* Console units per dp: a 44 dp target is 44 * this wide. */
+float TouchUI_ConPerDp(void);
 
 #endif

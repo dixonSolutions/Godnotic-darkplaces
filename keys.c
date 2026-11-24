@@ -1905,6 +1905,12 @@ Key_Event (int key, int ascii, qbool down)
 		return;
 	if (keydest == key_game && key != K_ESCAPE && TouchLua_KeyEvent(key, ascii, down)) // Touch: Lua client mods
 		return;
+	if (keydest == key_game && TouchChatLog_GameKey(key, down)) // Touch: the open chat log takes the wheel, page keys and Escape
+	{
+		if (key == K_ESCAPE)
+			tbl_keydest[key] = key_void; // the release goes nowhere
+		return;
+	}
 
 	// key_consoleactive is a flag not a key_dest because the console is a
 	// high priority overlay ontop of the normal screen (designed as a safety

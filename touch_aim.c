@@ -131,14 +131,14 @@ cvar_t cl_touch_autoshoot_humanlead = {CF_CLIENT | CF_ARCHIVE, "cl_touch_autosho
 cvar_t cl_touch_autoshoot_arc = {CF_CLIENT | CF_ARCHIVE, "cl_touch_autoshoot_arc", "1",
 	"Grenade launcher shots (Mortar, Electro orbs, Mine Layer): held when the arc to where the enemy will be hits a wall or the floor on the way (two traces), so a lob is not thrown into the wall in front of you"};
 cvar_t cl_touch_aim_breakout = {CF_CLIENT | CF_ARCHIVE, "cl_touch_aim_breakout", "1",
-	"Aim helpers let go when you turn away: a look drag that leaves the target drops the pull, the slowdown and auto-fire for that target at once, and it is not taken again for cl_touch_aim_breakout_cooldown unless you turn back onto it"};
-cvar_t cl_touch_aim_breakout_angle = {CF_CLIENT | CF_ARCHIVE, "cl_touch_aim_breakout_angle", "1.2",
+	"Aim helpers let go when you turn away: a look drag that keeps leaving the target drops the pull and the slowdown for it, and it is not taken again for cl_touch_aim_breakout_cooldown unless you turn back onto it; an instant-hit weapon still fires with the crosshair on it"};
+cvar_t cl_touch_aim_breakout_angle = {CF_CLIENT | CF_ARCHIVE, "cl_touch_aim_breakout_angle", "4",
 	"Break-out: degrees of drag away from the target (summed over about a quarter second) that release it"};
 cvar_t cl_touch_aim_breakout_speed = {CF_CLIENT | CF_ARCHIVE, "cl_touch_aim_breakout_speed", "15",
 	"Break-out: deg/s a drag must exceed to count as turning away; slower is a thumb at rest"};
-cvar_t cl_touch_aim_breakout_flick = {CF_CLIENT | CF_ARCHIVE, "cl_touch_aim_breakout_flick", "90",
+cvar_t cl_touch_aim_breakout_flick = {CF_CLIENT | CF_ARCHIVE, "cl_touch_aim_breakout_flick", "400",
 	"Break-out: a single frame of drag this fast (deg/s) releases the target at once"};
-cvar_t cl_touch_aim_breakout_cooldown = {CF_CLIENT | CF_ARCHIVE, "cl_touch_aim_breakout_cooldown", "0.7",
+cvar_t cl_touch_aim_breakout_cooldown = {CF_CLIENT | CF_ARCHIVE, "cl_touch_aim_breakout_cooldown", "0.25",
 	"Break-out: seconds before a released target may be taken again (0 - 3)"};
 cvar_t cl_touch_aim_breakout_return = {CF_CLIENT | CF_ARCHIVE, "cl_touch_aim_breakout_return", "4",
 	"Break-out: degrees from the body's edge within which turning back toward a released target takes it again at once"};
@@ -216,6 +216,8 @@ cvar_t cl_touch_hud_state = {CF_CLIENT, "_cl_touch_hud_state", "0",
 // A per-frame view change larger than this is a teleport or respawn, not a turn.
 #define TURN_SPIKE_DEG 60.0f
 #define ANTILAG_MAX    0.4f   // g_antilag rewinds at most this much ping (ANTILAG_LATENCY)
+#define DRAG_TIME      0.1f  // how long a drag is remembered (touch events come slower than frames)
+#define DRAG_RATE      60.0f // deg/s: a drag this fast is going somewhere
 #define ORB_HOLD       0.55f  // attack2 held this long lobs the Electro's three orbs
 // Target velocity: smoothed over about this many seconds; forgotten when a
 // player was not seen for TRACK_STALE seconds or jumps TRACK_JUMP units.
@@ -330,6 +332,8 @@ static struct
 	double settle_since;
 	int pt_ent;          // the target the pull held last frame, and its aim point
 	float pt_yaw, pt_pitch;
+	float drag_y, drag_p; // the player's turn over the last DRAG_TIME (degrees)
+	float pt_myaw, pt_mpitch; // how far that point moved in the last frame
 	float turn_yaw, turn_pitch, turn_dt; // the player's own turn this frame
 	double orbs_time, orbs_until;
 	int ghost_said;      // the enemy held by its last seen point (debug)
@@ -1422,21 +1426,6 @@ static int scan(const vec3_t eye, const vec3_t fwd, float cone, float lock_cone,
 			}
 		}
 
-		// a target the player turned away from: out of the running until the
-		// cooldown ends, or the player turns back onto it
-		if (TouchBrk_Held(&ta.brk, now, n))
-		{
-			touch_brk_cfg_t bc = brk_cfg();
-			float y0, p0, ey0, ep0, rh0 = atan(hw / dist) * (180.0f / M_PI), rv0 = atan(0.5f * (maxs[2] - mins[2]) / dist) * (180.0f / M_PI);
-			angles_to(eye, center, &y0, &p0);
-			ey0 = wrap180(y0 - cl.viewangles[YAW]);
-			ep0 = p0 - cl.viewangles[PITCH];
-			if (!TouchBrk_Return(&ta.brk, &bc, ta.turn_dt, ta.turn_yaw, ta.turn_pitch, ey0, ep0, edge_err(ey0, ep0, rh0, rv0)))
-				continue;
-			if (cl_touch_aim_debug.integer)
-				Con_Printf("touch aim: player %d taken again: the player turned back onto it\n", n);
-		}
-
 		// under the crosshair: the view ray enters the body, and nothing solid
 		// stands between the eye and that point
 		if (ray_box(eye, fwd, bmin, bmax, &t) && t < best_on)
@@ -1470,6 +1459,35 @@ static int scan(const vec3_t eye, const vec3_t fwd, float cone, float lock_cone,
 			e0 = sqrt(wrap180(yaw0 - cl.viewangles[YAW]) * wrap180(yaw0 - cl.viewangles[YAW]) + (pitch0 - cl.viewangles[PITCH]) * (pitch0 - cl.viewangles[PITCH]));
 			track_motion(n, org, mins, eye, vel, e0 < max(cone, lock_cone) + 5 && (cl_touch_autoshoot_air.integer || cl_touch_autoswitch_smart.integer), now);
 		}
+		// a target the player turned away from: out of the running until the
+		// cooldown ends, or the player turns back onto it. Only the pull lets go of
+		// it: with the crosshair on the body (above) auto-shoot still fires
+		if (TouchBrk_Held(&ta.brk, now, n))
+		{
+			touch_brk_cfg_t bc = brk_cfg();
+			float y0, p0, ey0, ep0, rh0 = atan(hw / dist) * (180.0f / M_PI), rv0 = atan(0.5f * (maxs[2] - mins[2]) / dist) * (180.0f / M_PI);
+			angles_to(eye, center, &y0, &p0);
+			ey0 = wrap180(y0 - cl.viewangles[YAW]);
+			ep0 = p0 - cl.viewangles[PITCH];
+			if (!TouchBrk_Return(&ta.brk, &bc, ta.turn_dt, n, ta.turn_yaw, ta.turn_pitch, ey0, ep0, edge_err(ey0, ep0, rh0, rv0)))
+			{
+				TouchBrk_Leaving(&ta.brk, &bc, now, ta.turn_dt, n, ta.turn_yaw, ta.turn_pitch, ey0, ep0);
+				continue;
+			}
+			if (cl_touch_aim_debug.integer)
+				Con_Printf("touch aim: player %d taken again: the player turned back onto it\n", n);
+		}
+		// a drag under way says where the player is going: the pull takes nobody
+		// new on the far side of it, or the view would be yanked back (with the
+		// crosshair on the body, above, auto-shoot still fires)
+		else if (cl_touch_aim_breakout.integer && n != ta.pt_ent)
+		{
+			float y0, p0, dm = sqrt(ta.drag_y * ta.drag_y + ta.drag_p * ta.drag_p);
+			angles_to(eye, center, &y0, &p0);
+			if (dm / DRAG_TIME >= DRAG_RATE && wrap180(y0 - cl.viewangles[YAW]) * ta.drag_y + (p0 - cl.viewangles[PITCH]) * ta.drag_p < 0)
+				continue;
+		}
+
 		VectorClear(lead);
 		if (fire)
 		{
@@ -1673,10 +1691,23 @@ static float shot_latency(void)
 	return l;
 }
 
+// What one primary shot takes here (TouchWep_ShotCost).
+static int wep_cost(const touch_wep_t *w)
+{
+	const char *owned[72];
+	int i, n = 0;
+	if (!w || strcmp(w->netname, "vaporizer"))
+		return w ? w->cost : 1;
+	for (i = 0; i < TouchHUD_NumWeapons() && n < 72; i++)
+		if (TouchHUD_WeaponOwned(i))
+			owned[n++] = TouchHUD_WeaponName(i);
+	return TouchWep_ShotCost(w, owned, n);
+}
+
 // Whether weapon `index` has ammo for one primary shot.
 static qbool weapon_ready(int index, const touch_wep_t *w, int held)
 {
-	int ammo = TouchHUD_WeaponAmmo(index), cost = w ? w->cost : 1;
+	int ammo = TouchHUD_WeaponAmmo(index), cost = wep_cost(w);
 	if (ammo < 0 || cost <= 0)
 		return true;
 	if (index == held)
@@ -1767,7 +1798,7 @@ static qbool dry_check(const aimtarget_t *near, int held, const touch_wep_t *wep
 	}
 	dist = near->entnum ? near->dist : ta.fight_dist > 0 ? ta.fight_dist : 800;
 	mclass = near->entnum ? ta.tracks[near->entnum & (TRACK_MAX - 1)].cls : TW_CLASS_STEADY;
-	nshots = TouchWep_ShotsLeft(TouchHUD_WeaponAmmo(held), TouchHUD_HeldClip(), wep->cost);
+	nshots = TouchWep_ShotsLeft(TouchHUD_WeaponAmmo(held), TouchHUD_HeldClip(), wep_cost(wep));
 	refire = TouchWep_Refire(wep->netname, ta.last_mode == TW_MODE_SECONDARY);
 	for (i = 0; i < TouchHUD_NumWeapons() && n < 72; i++)
 	{
@@ -3089,6 +3120,7 @@ static void aim_frame(void)
 	qbool autoshoot, assist, aim_touch, manual, locked, guided, input_enabled, pull_target_set = false;
 	float friction, strength, cone, turn_yaw, turn_pitch, turn_mag, radius, pull_yaw = 0, pull_pitch = 0;
 	vec3_t eye, fwd;
+	qbool snap_shot = false;
 	int on_target, friend_on, on_shoot, shootable, held, retained_seen, mode = TW_MODE_PRIMARY, why = TW_WHY_DEFAULT, mate_block;
 	qbool was_firing = ta.firing || ta.firing2;
 	const touch_wep_t *wep;
@@ -3207,10 +3239,18 @@ static void aim_frame(void)
 	ta.turn_yaw = turn_yaw;
 	ta.turn_pitch = turn_pitch;
 	ta.turn_dt = dt;
+	if (ta.prev_valid && dt > 0)
+	{
+		float k = dt >= DRAG_TIME ? 0.0f : 1.0f - dt / DRAG_TIME;
+		ta.drag_y = ta.drag_y * k + turn_yaw;
+		ta.drag_p = ta.drag_p * k + turn_pitch;
+	}
+	else
+		ta.drag_y = ta.drag_p = 0;
 	if (cl_touch_aim_breakout.integer && ta.prev_valid)
 	{
 		touch_brk_cfg_t bc = brk_cfg();
-		float ey = ta.pt_ent ? wrap180(ta.pt_yaw - ta.prev_angles[YAW]) : 0, ep = ta.pt_ent ? ta.pt_pitch - ta.prev_angles[PITCH] : 0;
+		float ey = ta.pt_ent ? wrap180(ta.pt_yaw + ta.pt_myaw - ta.prev_angles[YAW]) : 0, ep = ta.pt_ent ? ta.pt_pitch + ta.pt_mpitch - ta.prev_angles[PITCH] : 0;
 		int ent = ta.pt_ent;
 		if (TouchBrk_Step(&ta.brk, &bc, now, dt, turn_yaw, turn_pitch, ent, ey, ep))
 			breakout_release(ent);
@@ -3393,7 +3433,14 @@ static void aim_frame(void)
 				float wide = window * TouchPred_WindowScale(TouchPred_Confidence(nt->pv.noise, sqrt(near.vel[0] * near.vel[0] + near.vel[1] * near.vel[1])));
 				window = max(window, min(wide, RADIUS_MAX));
 			}
-			if (near.on_lead || near.err <= window)
+			// an instant hit the pull turns onto the target this very frame
+			// leaves with the turned view: fire now, not a frame later
+			if (f && f->kind == TW_KIND_HITSCAN && strength > 0 && !near.hidden && !TouchHook_Rescuing() && near.err <= cone
+				&& (((aim_touch || cl.cmd.forwardmove != 0 || cl.cmd.sidemove != 0)
+					&& (turn_mag / dt > INPUT_MIN_RATE || cl.cmd.forwardmove != 0 || cl.cmd.sidemove != 0 || now - ta.last_input < INPUT_HOLD))
+					|| (cl_touch_aimassist_track.integer && ta.lock_ent && ta.lock_ent == near.entnum && now < ta.lock_until)))
+				snap_shot = true;
+			if (near.on_lead || near.err <= window || snap_shot)
 			{
 				vec3_t lp;
 				VectorAdd(near.center, near.lead, lp);
@@ -3419,6 +3466,16 @@ static void aim_frame(void)
 				}
 			}
 		}
+	}
+
+	// the crosshair runs over a body the pull does not hold (the player is
+	// turning away from it, or another one is nearer): an instant hit fires
+	if (!on_shoot && autoshoot && on_target && wep && hitscan_lag <= 0)
+	{
+		const touch_wep_fire_t *f = ta.last_mode == TW_MODE_SECONDARY && wep->sec.kind != TW_KIND_NONE ? &wep->sec : &wep->pri;
+		if (f->kind == TW_KIND_HITSCAN && !(near.entnum == on_target && near.hidden))
+			on_shoot = on_target;
+		snap_shot = false;
 	}
 
 	// a target behind a wall (offline practice): only a splash weapon whose
@@ -3489,7 +3546,7 @@ static void aim_frame(void)
 		float zone = atan(0.5f * TW_HEAD_ZONE_H / max(near.dist, 1.0f)) * (180.0f / M_PI);
 		if (!ta.head_wait)
 			ta.head_wait = now;
-		if (fabs(near.pitch - cl.viewangles[PITCH]) > zone && now - ta.head_wait < HEAD_WAIT)
+		if (!snap_shot && fabs(near.pitch - cl.viewangles[PITCH]) > zone && now - ta.head_wait < HEAD_WAIT)
 			on_shoot = 0;
 	}
 	else
@@ -3595,6 +3652,13 @@ static void aim_frame(void)
 			VectorAdd(near.center, near.lead, ip);
 		else
 			VectorCopy(ta.tracks[on_shoot & (TRACK_MAX - 1)].org, ip);
+		if (snap_shot && near.entnum == on_shoot)
+		{
+			// the line the shot leaves along, after the pull's turn
+			vec3_t sa;
+			VectorSet(sa, near.pitch, near.yaw, 0);
+			AngleVectors(sa, fwd, NULL, NULL);
+		}
 		mate_block = mate_blocks(eye, fwd, VectorDistance(eye, ip), wep, f, ip, &how);
 		if (mate_block)
 		{
@@ -3734,7 +3798,7 @@ static void aim_frame(void)
 	// slowing that down only fights the pull and makes the target harder to
 	// reach. It is there to stop a turn on the body, or that runs past it.
 	ta.lookscale = 1;
-	if (friction > 0 && near.entnum && !TouchBrk_PullOff(&ta.brk, now))
+	if (friction > 0 && near.entnum)
 	{
 		float ey = wrap180(near.yaw - cl.viewangles[YAW]), ep = near.pitch - cl.viewangles[PITCH];
 		qbool approaching = !on_target && turn_mag / dt > AWAY_MIN_RATE && turn_yaw * ey + turn_pitch * ep > 0;
@@ -3743,7 +3807,7 @@ static void aim_frame(void)
 		if (!approaching && !leaving)
 			ta.lookscale = 1.0f - friction * bound(0.0f, 1.0f - near.err / cone, 1.0f);
 	}
-	else if (friction > 0 && on_target && !TouchBrk_PullOff(&ta.brk, now))
+	else if (friction > 0 && on_target && !TouchBrk_Held(&ta.brk, now, on_target))
 		ta.lookscale = 1.0f - friction;
 
 	// Aim at the selected point immediately while the assist is active.
@@ -3812,8 +3876,8 @@ static void aim_frame(void)
 	if (cl_touch_aim_debug.integer >= 5 && near.entnum)
 		Con_Printf("touch aim: pull? target %d err %.1f yaw %+.1f pitch %+.1f lock %d until %+.2f fired %.2f ago touch %d input %.2f ago rocket %s\n", near.entnum, near.err,
 			wrap180(near.yaw - cl.viewangles[YAW]), near.pitch - cl.viewangles[PITCH], ta.lock_ent, ta.lock_until - now, now - ta.lock_fired, aim_touch, now - ta.last_input, rk_state_name[ta.rk_state]);
-	if (strength > 0 && near.entnum && !TouchHook_Rescuing() && !TouchBrk_PullOff(&ta.brk, now)
-		&& ((aim_touch && now - ta.last_input < INPUT_HOLD)
+	if (strength > 0 && near.entnum && !TouchHook_Rescuing()
+		&& (((aim_touch || cl.cmd.forwardmove != 0 || cl.cmd.sidemove != 0) && now - ta.last_input < INPUT_HOLD)
 			|| practice.seethrough || practice.full360 // offline practice: the pull acts on its own
 			|| ta.rk_state != RK_IDLE
 			|| (cl_touch_aimassist_track.integer && ta.lock_ent && ta.lock_ent == near.entnum && now < ta.lock_until)))
@@ -3829,6 +3893,8 @@ static void aim_frame(void)
 		debug_shots(eye, ta.fire_target ? ta.fire_target : ta.lock_ent ? ta.lock_ent : near.entnum);
 	}
 	ta.track_ent = near.entnum;
+	ta.pt_myaw = near.entnum && near.entnum == ta.pt_ent ? wrap180(near.yaw - ta.pt_yaw) : 0;
+	ta.pt_mpitch = near.entnum && near.entnum == ta.pt_ent ? near.pitch - ta.pt_pitch : 0;
 	ta.pt_ent = near.entnum;
 	ta.pt_yaw = near.yaw;
 	ta.pt_pitch = near.pitch;

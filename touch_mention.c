@@ -35,6 +35,7 @@ static cvar_t touch_mention_draws = {CF_CLIENT, "_touch_mention_draws", "0", "te
 
 static cvar_t touch_mention_pick = {CF_CLIENT, "_touch_mention_pick", "", "test: the engine @ list as \"count:first name\""};
 static cvar_t touch_sheet_pick = {CF_CLIENT, "_touch_sheet_pick", "", "test: the touch sheet @ list as \"count:first name\""};
+static cvar_t touch_typing_sim = {CF_CLIENT, "_touch_typing_sim", "", "test: names (comma separated) shown as typing, as if their chat bubble were up"};
 static cvar_t touch_mention_dbg = {CF_CLIENT, "_touch_mention_dbg", "", "test: key_dest, chat line and cursor the @ list sees"};
 static cvar_t touch_sheet_dbg = {CF_CLIENT, "_touch_sheet_dbg", "", "test: the touch sheet's open state and text"};
 static cvar_t touch_chat_roster_source = {CF_CLIENT, "touch_chat_roster_source", "auto", "where the @ list takes names from: auto (cl.scores, then getstatus, plus QuakeC), scores, status (getstatus only: for tests)"};
@@ -270,6 +271,20 @@ static void TM_BuildTyping(char *out, size_t size)
 	char store[TM_ROSTER_MAX][TM_MAX_NAME];
 	int count = 0, i, r, model, n = min(cl.num_entities, MAX_EDICTS);
 	out[0] = 0;
+	if (cls.state == ca_connected && touch_chat_typing.integer && touch_typing_sim.string[0])
+	{
+		/* test: a remote player typing, without a server's bubble */
+		char sim[256], *tok, *save = NULL;
+		dp_strlcpy(sim, touch_typing_sim.string, sizeof(sim));
+		for (tok = strtok_r(sim, ",", &save); tok && count < TM_ROSTER_MAX; tok = strtok_r(NULL, ",", &save))
+		{
+			dp_strlcpy(store[count], tok, TM_MAX_NAME);
+			names[count] = store[count];
+			count++;
+		}
+		TouchMention_TypingText(names, count, out, size);
+		return;
+	}
 	if (cls.state != ca_connected || !touch_chat_typing.integer || !(model = TM_BubbleModel()))
 		return;
 	for (i = 1; i < n && count < TM_ROSTER_MAX; i++)
@@ -465,6 +480,7 @@ void TouchMention_Init(void)
 	Cvar_RegisterVariable(&touch_chat_roster_source);
 	Cvar_RegisterVariable(&touch_sheet_dbg);
 	Cvar_RegisterVariable(&touch_mention_dbg);
+	Cvar_RegisterVariable(&touch_typing_sim);
 	Cvar_RegisterVariable(&touch_mention_pick);
 	Cvar_RegisterVariable(&touch_sheet_pick);
 }
@@ -530,8 +546,15 @@ void TouchMention_Draw(float x, float v, float size)
 		y += size; /* the input line sits at v */
 	if (typing[0])
 	{
-		DrawQ_String(x, y, typing, 0, size, size, 0.75f, 0.85f, 1.0f, 0.9f, 0, NULL, true, FONT_CHAT);
-		y += size;
+		/* never on the input line or the QuakeC sheet's field: those hold only what the player types */
+		cvar_t *sheet = Cvar_FindVar(&cvars_all, "_touch_chat_sheet", CF_CLIENT);
+		float ty = TouchMention_TypingY(v, size, key_dest == key_message, size * 2.0f, sheet && sheet->integer);
+		if (ty >= 0)
+		{
+			DrawQ_String(x, ty, typing, 0, size, size, 0.75f, 0.85f, 1.0f, 0.9f, 0, NULL, true, FONT_CHAT);
+			if (key_dest != key_message)
+				y += size; /* (with the input open the line is above it and the list below keeps its place) */
+		}
 	}
 	TM_Matches();
 	if (!tm_pick.n)

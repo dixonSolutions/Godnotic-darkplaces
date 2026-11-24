@@ -612,6 +612,22 @@ static void VID_LiftTappedFingers(void)
 		}
 }
 
+// Touch: a finger-down for an id the table already holds (its up was lost: a
+// cancel, a second finger, a pause) moves that slot instead of taking a second
+// one, which no up would ever clear: a button held through it stayed held.
+static qbool VID_TouchFingerKnown(int id, float x, float y)
+{
+	int i;
+	for (i = 0; i < MAXFINGERS - 1; i++)
+		if (multitouch[i][0] == id && !vid_finger_lift[i])
+		{
+			multitouch[i][1] = x;
+			multitouch[i][2] = y;
+			return true;
+		}
+	return false;
+}
+
 // modified heavily by ELUAN
 static qbool VID_TouchscreenArea(int corner, float px, float py, float pwidth, float pheight, const char *icon, float textheight, const char *text, float *resultmove, qbool *resultbutton, keynum_t key, const char *typedtext, float deadzone, float oversizepixels_x, float oversizepixels_y, qbool iamexclusive)
 {
@@ -2046,6 +2062,8 @@ void Sys_SDL_HandleEvents(void)
 					break;
 				// Touch: a finger on the vote chip or card stays out of the table
 				if (TouchVote_Finger(0, (int)event.tfinger.fingerId + 1, event.tfinger.x, event.tfinger.y))
+					break;
+				if (VID_TouchFingerKnown((int)event.tfinger.fingerId + 1, event.tfinger.x, event.tfinger.y)) // Touch
 					break;
 				for (i = 0;i < MAXFINGERS-1;i++)
 				{

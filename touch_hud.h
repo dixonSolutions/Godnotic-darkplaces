@@ -19,6 +19,10 @@ qbool TouchHUD_HideCursorPic(const char *picname);
 struct prvm_prog_s;
 qbool TouchHUD_HideStockKeyPanel(struct prvm_prog_s *prog);
 
+// Shared glass surfaces for engine overlays, in console coordinates.
+void TouchHUD_GlassPanel(float x, float y, float w, float h, float radius, float alpha);
+void TouchHUD_GlassControl(float cx, float cy, float hx, float hy, qbool pressed, qbool selected, float alpha);
+
 // Cvars and commands (CL_InitInput).
 void TouchHUD_Init(void);
 
@@ -70,6 +74,7 @@ void TouchHUD_SyncStockPanels(void);
 
 // Release every key this module is holding (disconnect, menu, CSQC swap).
 void TouchHUD_ReleaseAll(void);
+void TouchHUD_DropContacts(void);
 // Called when a CSQC finished loading or was unloaded: the weapon list and the
 // WEAPONS stat index are read from its globals.
 void TouchHUD_ProgsChanged(void);
@@ -111,5 +116,8 @@ qbool TouchHUD_OverlayFinger(int type, int id, float nx, float ny);
 // A real mouse button on the desk spectator bar while the pointer is free: true when eaten.
 qbool TouchHUD_OverlayMouse(qbool down, int button, qbool synthetic, float wx, float wy, qbool pointer_free);
 qbool TouchHUD_JoinMouse(qbool down, int button, qbool synthetic, float wx, float wy, qbool pointer_free);
+
+void TouchHUD_SpecInputsBegin(void);
+void TouchHUD_SpecInputsEnd(void);
 
 #endif

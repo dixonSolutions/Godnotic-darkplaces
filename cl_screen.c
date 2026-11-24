@@ -1770,7 +1770,7 @@ static void SCR_DrawScreen (void)
 		// if CSQC is loaded, it is required to provide the CSQC_UpdateView function,
 		// and won't render a view if it does not call that.
 		if (!TouchJoinPreview_Camera() && CLVM_prog->loaded && !(CLVM_prog->flag & PRVM_CSQC_SIMPLE)) // Touch: a spectator camera while the map loads
-			CL_VM_UpdateView(r_stereo_side ? 0.0 : max(0.0, cl.time - cl.oldtime));
+			{ TouchHUD_SpecInputsBegin(); CL_VM_UpdateView(r_stereo_side ? 0.0 : max(0.0, cl.time - cl.oldtime)); TouchHUD_SpecInputsEnd(); } // Touch: spectator inputs
 		else
 		{
 			// Prepare the scene mesh for rendering - this is lightning beams and other effects rendered as normal surfaces
@@ -1851,7 +1851,7 @@ static void SCR_DrawScreen (void)
 			Sbar_Draw();
 			TouchQ1_SbarEnd(); // Touch:
 			if (CLVM_prog->loaded && CLVM_prog->flag & PRVM_CSQC_SIMPLE)
-				CL_VM_DrawHud(r_stereo_side ? 0.0 : max(0.0, cl.time - cl.oldtime));
+				{ TouchHUD_SpecInputsBegin(); CL_VM_DrawHud(r_stereo_side ? 0.0 : max(0.0, cl.time - cl.oldtime)); TouchHUD_SpecInputsEnd(); } // Touch: spectator inputs
 		}
 		SHOWLMP_drawall();
 		SCR_CheckDrawCenterString();
@@ -1900,6 +1900,7 @@ static void SCR_DrawScreen (void)
 		SCR_DrawBrand();
 		SCR_DrawTouchscreenOverlay();
 		TouchShell_Draw(); // Touch: console button, over the console sheet
+		TouchChatLog_DrawOverlay(); // Touch: the open chat log, over every touch control
 	}
 	TouchHUD_DrawConsolePointer(); // Touch: mouse pointer over the console
 	if (r_timereport_active)

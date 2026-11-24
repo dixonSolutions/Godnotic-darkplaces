@@ -165,6 +165,12 @@ static void place(void)
 		float hdr = TouchUI_SheetHeaderHeight(H);
 		by = max(by, hdr + margin);
 	}
+	else if (key_dest == key_message)
+	{
+		// The mouse sheet (touch controls off) hangs its KEYBOARD toggle in
+		// the same corner over the chat line: under that.
+		by = max(by, 8.0f + TouchUI_MouseToggleHeight(H) + margin);
+	}
 	// The published HUD mode, not a guess of our own: the map vote that follows
 	// the scoreboard is a match end too, and cl.intermission alone missed it.
 	else if ((cl.intermission || TouchMode_IsMatchEnd(TouchHudMode_Current()->mode)) && !in_match())

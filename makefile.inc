@@ -62,6 +62,7 @@ OBJ_COMMON= \
 	touch_pause.o \
 	touch_datafetch.o \
 	touch_nade.o \
+	touch_dash.o \
 	touch_android.o \
 	touch_lua.o \
 	touch_lua_cl.o \

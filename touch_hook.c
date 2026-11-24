@@ -21,6 +21,7 @@ are touch_rescue.h's.
 #include "touch_turn.h"
 #include "touch_pause.h"
 #include "touch_nade.h"
+#include "touch_dash.h"
 #include "touch_frontend.h"
 #include "touch_tactics.h"
 
@@ -41,6 +42,8 @@ cvar_t cl_touch_hook_rescue_cooldown = {CF_CLIENT | CF_ARCHIVE, "cl_touch_hook_r
 // Engine -> CSQC: what the port's HOOK button shows.
 cvar_t cl_touch_hook_avail = {CF_CLIENT, "_cl_touch_hook_avail", "0",
 	"Set by the engine: the hook the touch controls can use now, 0 none, 1 the offhand hook, 2 the Hook weapon"};
+cvar_t cl_touch_hook_row = {CF_CLIENT, "_cl_touch_hook_row", "0",
+	"Set by the engine: the HOOK entry of the weapon strip: 0 none, 1 ready, 2 held, 3 there but no hook to use now (no fuel)"};
 cvar_t cl_touch_hook_state = {CF_CLIENT, "_cl_touch_hook_state", "0",
 	"Set by the engine: 1 while the hook is held by the HOOK button, 2 while the fall rescue holds or aims it"};
 
@@ -84,6 +87,7 @@ static struct
 {
 	// what there is
 	int avail;
+	int row;                   // the HOOK entry of the weapon strip (TOUCH_HOOKROW_*)
 	int hook_index;            // TouchHUD index of the Hook weapon, -1 none
 	int mut_ofs0, mut_ofs1;    // active_mutators[0], [1] global offsets, -1 none
 	qbool mut_int;             // the globals are ints (else floats)
@@ -338,6 +342,7 @@ void TouchHook_ProgsChanged(void)
 	bind_weapon();
 	TouchDodge_ProgsChanged();
 	TouchNade_ProgsChanged();
+	TouchDash_ProgsChanged();
 	th.switched = false;
 	th.prev_weapon = -1;
 	TouchRescue_Reset(&th.rs);
@@ -373,15 +378,33 @@ int TouchHook_Available(void)
 	return th.avail;
 }
 
-qbool TouchHook_ButtonShown(void)
+// The HOOK entry of the weapon strip: there while the server has a hook
+// (the offhand hook, or the Hook weapon in the inventory) unless touch_hook_visible
+// is 0 -- an old saved layout's 1 and 2 both mean "there". Its place is kept
+// while the hook has no fuel, so the rows never move.
+static int hook_row_state(const char *blocked)
 {
 	cvar_t *mode = Cvar_FindVar(&cvars_all, "touch_hook_visible", ~0);
-	int m = mode ? mode->integer : 2;
-	if (m <= 0 || !vid_touchscreen.integer || vid_touchscreen_mouselook.integer)
-		return false;
-	if (m == 1)
-		return true;
-	return th.avail != TOUCH_HOOK_NONE;
+	qbool has;
+	// not tied to a mouse being present: the strip keeps its rows whatever the
+	// input (the NADE row is the same); the hold itself stands down in block_reason().
+	if (blocked || !vid_touchscreen.integer)
+		return TOUCH_HOOKROW_HIDDEN;
+	if (mode && mode->integer == 0)
+		return TOUCH_HOOKROW_HIDDEN;
+	if (mode && mode->integer == 1)
+		Cvar_SetValueQuick(mode, 2); // an old layout's "always": the settings radio knows 0 and 2 now
+	has = offhand_hook() || (th.hook_index >= 0 && TouchHUD_WeaponOwned(th.hook_index));
+	if (!has)
+		return TOUCH_HOOKROW_HIDDEN;
+	if (th.avail == TOUCH_HOOK_NONE)
+		return TOUCH_HOOKROW_EMPTY;
+	return th.held ? TOUCH_HOOKROW_HELD : TOUCH_HOOKROW_READY;
+}
+
+int TouchHook_RowState(void)
+{
+	return th.row;
 }
 
 qbool TouchHook_Held(void)
@@ -391,7 +414,7 @@ qbool TouchHook_Held(void)
 
 qbool TouchHook_InUse(void)
 {
-	return th.held || th.switched || host.realtime - th.release_time < HOOK_GUARD;
+	return th.held || th.switched || host.realtime - th.release_time < HOOK_GUARD || TouchDash_Busy();
 }
 
 qbool TouchHook_Rescuing(void)
@@ -422,7 +445,7 @@ int TouchHook_Buttons(void)
 	static cvar_t *sheet;
 	if (!sheet)
 		sheet = Cvar_FindVar(&cvars_all, "_touch_chat_sheet", CF_CLIENT);
-	return (sheet && sheet->integer ? 512 : 0) | th.buttons | TouchDodge_Buttons() | TouchNade_Buttons() | TouchTactics_Buttons();
+	return (sheet && sheet->integer ? 512 : 0) | th.buttons | TouchDodge_Buttons() | TouchNade_Buttons() | TouchDash_Buttons() | TouchTactics_Buttons();
 }
 
 // The server runs the nades mutator (offhand grenades on +hook).
@@ -547,6 +570,7 @@ void TouchHook_Frame(void)
 
 	TouchPause_Frame();
 	TouchNade_Frame();
+	TouchDash_Frame();
 	TouchTurn_Frame();
 	if (cl.worldmodel != th.hurt_model)
 		th_bind_map();
@@ -554,6 +578,12 @@ void TouchHook_Frame(void)
 	t0 = Sys_DirtyTime();
 
 	th.avail = blocked ? TOUCH_HOOK_NONE : which_hook();
+	th.row = hook_row_state(blocked);
+	if (cl_touch_hook_row.integer != th.row)
+	{
+		dpsnprintf(publish, sizeof(publish), "%d", th.row);
+		Cvar_SetQuick(&cl_touch_hook_row, publish);
+	}
 	if (cl_touch_hook_avail.integer != th.avail)
 	{
 		dpsnprintf(publish, sizeof(publish), "%d", th.avail);
@@ -577,7 +607,8 @@ void TouchHook_Frame(void)
 			turn_rate = sqrt(ty * ty + tp * tp) / dt;
 	}
 
-	manual = !blocked && (th.hud_down || th.cmd_down);
+	// +hook is the grenade's while it is held: the two never share a finger or a frame
+	manual = !blocked && (th.hud_down || th.cmd_down) && !TouchNade_Held();
 	allowed = !blocked && cl_touch_hook_rescue.integer;
 	onground = cl.onground;
 	Matrix4x4_OriginFromMatrix(&r_refdef.view.matrix, eye);
@@ -785,6 +816,7 @@ void TouchHook_Init(void)
 	TouchTactics_Init();
 	TouchPause_Init();
 	TouchNade_Init();
+	TouchDash_Init();
 	TouchFE_Init(); // native front-end bridge (touch_frontend.c)
 	TouchMention_Init();
 	TouchChatLog_Init();
@@ -794,6 +826,7 @@ void TouchHook_Init(void)
 	Cvar_RegisterVariable(&cl_touch_hook_rescue_range);
 	Cvar_RegisterVariable(&cl_touch_hook_rescue_cooldown);
 	Cvar_RegisterVariable(&cl_touch_hook_avail);
+	Cvar_RegisterVariable(&cl_touch_hook_row);
 	Cvar_RegisterVariable(&cl_touch_hook_state);
 	Cmd_AddCommand(CF_CLIENT, "+touch_hook", TouchHook_Down_f, "hold the grappling hook from the touch controls' HOOK button (the offhand hook, or the Hook weapon switched to and back)");
 	Cmd_AddCommand(CF_CLIENT, "-touch_hook", TouchHook_Up_f, "let go of the grappling hook held by +touch_hook");

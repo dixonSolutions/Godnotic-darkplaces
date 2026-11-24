@@ -840,6 +840,26 @@ static qbool TouchWep_IsFallback(const char *netname)
 	return w && (w->flags & TW_FALLBACK);
 }
 
+// What one primary shot of w takes, with these weapons owned. Instagib's
+// Vaporizer takes 1 cell, not 10 (vaporizer.qc), and no server tells the
+// client the mode; there it is the only gun a player has, the blaster and
+// the tools (hook, ...) aside.
+static int TouchWep_ShotCost(const touch_wep_t *w, const char *const *owned, int n)
+{
+	int i;
+	if (!w)
+		return 1;
+	if (strcmp(w->netname, "vaporizer"))
+		return w->cost;
+	for (i = 0; i < n; i++)
+	{
+		const touch_wep_t *o = TouchWep_Find(owned[i]);
+		if (!o || (o != w && !(o->flags & (TW_FALLBACK | TW_NO_AUTOFIRE))))
+			return w->cost;
+	}
+	return 1;
+}
+
 // Whether to leave the current weapon for a candidate of rank cand_rank:
 // always when the current one cannot shoot here (no ammo, out of range,
 // inside its own splash, not on the list), otherwise only for a clear win.

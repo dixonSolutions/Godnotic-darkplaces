@@ -230,6 +230,28 @@ static inline void TouchMention_TypingText(const char *const *names, int count,
 	}
 }
 
+// Where the "<names> are typing" line goes, from the top of the chat input
+// line (v) and the text size. It is information about OTHER players: it must
+// never sit on the player's own input line or field, which hold only what the
+// player types. Returns the y of the line, or -1 for "do not draw" (the
+// QuakeC chat sheet draws it itself, over its own field, and the engine's copy
+// landed on that field). input_open: the chat input is being typed in;
+// input_h: how tall the input box is (at least one text line). With the input
+// open the line goes above it (below it when there is no room above); with
+// no input open it goes at v, which is then only the chat area.
+static inline float TouchMention_TypingY(float v, float size, int input_open, float input_h, int qc_sheet)
+{
+	if (qc_sheet)
+		return -1;
+	if (!input_open)
+		return v;
+	if (input_h < size)
+		input_h = size;
+	if (v - size * 1.2f >= 0)
+		return v - size * 1.2f;
+	return v + input_h + size * 0.2f;
+}
+
 // The speaker of a printed chat line ("name^7: text" or team chat "(team) name: text"),
 // colour codes stripped. 1 and the name in out, or 0 when the line has no speaker.
 static inline int TouchMention_ChatName(const char *line, char *out, size_t size)

@@ -1,6 +1,8 @@
 #ifndef TOUCH_NADE_H
 #define TOUCH_NADE_H
 
+#include "qtypes.h"
+
 // Godnotic: the offhand grenade (the nades mutator) from the touch
 // controls, for both HUDs: held to cook, let go to throw, thrown just before
 // it would blow in the hand. See touch_nade.c.
@@ -15,6 +17,8 @@ void TouchNade_ProgsChanged(void);
 void TouchNade_Frame(void);
 // button6 (+hook) while the grenade is held.
 int TouchNade_Buttons(void);
+// The grenade is held now (+hook is its): the hook stands down.
+qbool TouchNade_Held(void);
 // For the engine HUD's NADE row.
 int TouchNade_State(void);
 float TouchNade_Timer(void);     // 0..1 of the fuse while cooking

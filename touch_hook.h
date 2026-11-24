@@ -43,8 +43,13 @@ int TouchHook_Buttons(void);
 
 // TOUCH_HOOK_* while the touch controls may use it, else TOUCH_HOOK_NONE.
 int TouchHook_Available(void);
-// HOOK is on screen and takes touches (touch_hook_visible, availability, touch mode).
-qbool TouchHook_ButtonShown(void);
+// The HOOK entry of the weapon strip (the separate HOOK button is gone): one of
+// TOUCH_HOOKROW_*. Its place is kept while the server has a hook.
+#define TOUCH_HOOKROW_HIDDEN 0
+#define TOUCH_HOOKROW_READY  1
+#define TOUCH_HOOKROW_HELD   2
+#define TOUCH_HOOKROW_EMPTY  3  // the server has a hook, but none to use now (no fuel)
+int TouchHook_RowState(void);
 // The hook is held now, by the HOOK button or by the rescue (the button glows).
 qbool TouchHook_Held(void);
 // Auto-shoot and auto-switch stand down: the hook is held, its weapon switch

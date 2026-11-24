@@ -908,6 +908,8 @@ const vec4_t string_colors[] =
 
 #define STRING_COLORS_COUNT	(sizeof(string_colors) / sizeof(vec4_t))
 
+#include "touch_textcolor.h" // Touch: readable player colour codes
+
 static void DrawQ_GetTextColor(float color[4], int colorindex, float r, float g, float b, float a, qbool shadow)
 {
 	float C = r_textcontrast.value;
@@ -921,6 +923,7 @@ static void DrawQ_GetTextColor(float color[4], int colorindex, float r, float g,
 	}
 	else
 		Vector4Copy(string_colors[colorindex], color);
+	if (colorindex & 0x10000) Touch_TextColorLift(color); // Touch: keep dark RGB names readable
 	Vector4Set(color, color[0] * r * C + B, color[1] * g * C + B, color[2] * b * C + B, color[3] * a);
 	if (shadow)
 	{
@@ -1073,10 +1076,10 @@ float DrawQ_TextWidth_UntilWidth_TrackColors_Scale(const char *text, size_t *max
 
 		if (!fontmap || (ch <= 0xFF && fontmap->glyphs[ch].image) || (ch >= 0xE000 && ch <= 0xE0FF))
 		{
-			if (ch > 0xE000)
+			if (ch >= 0xE000 && ch <= 0xE0FF)
 				ch -= 0xE000;
 			if (ch > 0xFF)
-				continue;
+				ch = '?'; // Touch: bitmap fonts have no Unicode glyph
 			if (fontmap)
 				map = ft2_oldstyle_map;
 			prevch = 0;
@@ -1259,10 +1262,10 @@ float DrawQ_String_Scale(float startx, float starty, const char *text, size_t ma
 			}
 			if (!fontmap || (ch <= 0xFF && fontmap->glyphs[ch].image) || (ch >= 0xE000 && ch <= 0xE0FF))
 			{
-				if (ch >= 0xE000)
+				if (ch >= 0xE000 && ch <= 0xE0FF)
 					ch -= 0xE000;
 				if (ch > 0xFF)
-					goto out;
+					ch = '?'; // Touch: match bitmap-font width and drawing
 				if (fontmap)
 					map = ft2_oldstyle_map;
 				prevch = 0;
@@ -1329,7 +1332,6 @@ float DrawQ_String_Scale(float startx, float starty, const char *text, size_t ma
 				//prevmap = map;
 				prevch = ch;
 			}
-out:
 			if (shadow)
 			{
 				x -= 1.0/pix_x * r_textshadow.value;

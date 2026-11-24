@@ -2276,7 +2276,7 @@ static int NetConn_ClientParsePacket(lhnetsocket_t *mysocket, unsigned char *dat
 				{
 					*p = 0; // cut off the string there
 					++p;
-					info->players_len = dp_strlcpy(info->players, p, sizeof(info->players));
+					info->players_len = TouchNet_CopyPlayerBlock(info->players, sizeof(info->players), p); // Touch: whole lines, no truncation warning
 				}
 				else
 				{

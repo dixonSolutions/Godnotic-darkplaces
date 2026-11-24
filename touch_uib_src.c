@@ -350,9 +350,11 @@ size_t TouchSrvInfo_PlayerDetails(const char *status, char *out, size_t outsize)
 					pl->has_team = true;
 					pl->team = team;
 				}
-				dp_strlcpy(pl->name, quote + 1, sizeof(pl->name));
-				char *name_end = strchr(pl->name, '"');
-				if (name_end) *name_end = 0;
+				// the name is exactly what lies between the quotes (copying to the end of
+				// the whole status made every long status warn about a truncated string)
+				size_t name_len = min((size_t)(close - (quote + 1)), sizeof(pl->name) - 1);
+				memcpy(pl->name, quote + 1, name_len);
+				pl->name[name_len] = 0;
 				if (pl->name[0]) count++;
 			}
 		}

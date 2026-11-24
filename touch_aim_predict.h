@@ -208,68 +208,94 @@ typedef struct touch_brk_cfg_s
 	float ret;       // deg: turning back to within this of it takes it again
 } touch_brk_cfg_t;
 
+#define TB_OUT 8 // released targets held out at once: with one, two close enemies took turns
+
 typedef struct touch_brk_s
 {
-	float acc;       // drag away from the target, with decay (degrees)
-	int ent;         // the target released (0 none)
-	double until;    // and until when
-	double pull_off; // no pull or friction for any target until
+	float acc_y, acc_p; // net drag leaving the target, with decay (degrees)
+	int on;             // the target it was summed against
+	struct { int ent; double until; } out[TB_OUT]; // the targets released, and until when
 } touch_brk_t;
 
-#define TB_DECAY    0.25f // seconds over which the summed drag fades
-#define TB_PULL_OFF 0.15f // the pull stays off this long after a frame of dragging away
+#define TB_DECAY  0.25f // seconds over which the summed drag fades
+#define TB_FLICK_DT (1.0f / 60.0f) // a touch event lands in one frame, however short: a flick is judged over this much
+#define TB_FOLLOW 1.5f  // a turn up to this many times the way to the target follows it
 
 static float tb_len(float a, float b)
 {
 	return sqrtf(a * a + b * b);
 }
 
-// The part of the player's turn (ty, tp degrees this frame) that is not
-// toward the target (ey, ep degrees from the view to it), and the part that is.
-static float TouchBrk_AwayPart(float ty, float tp, float ey, float ep, float *toward)
+// The part of the player's turn (ty, tp degrees this frame) that goes to the
+// target (ey, ep degrees from the view to where it is now): a drag that follows
+// a moving target is not leaving it, one that runs well past it is. The rest of
+// the turn, which leaves the target, goes to ly, lp.
+static float TouchBrk_Toward(float ty, float tp, float ey, float ep, float *ly, float *lp)
 {
-	float e = tb_len(ey, ep), turn = tb_len(ty, tp), along, pa, pb;
-	*toward = 0;
-	if (turn <= 0)
+	float e = tb_len(ey, ep), along = 0;
+	*ly = ty;
+	*lp = tp;
+	if (e <= 0)
 		return 0;
-	if (e <= 0.3f)
-		return turn; // on the point: any drag leaves it
 	along = (ty * ey + tp * ep) / e;
 	if (along <= 0)
-		return turn;
-	*toward = along;
-	pa = ty - along * ey / e;
-	pb = tp - along * ep / e;
-	return tb_len(pa, pb);
+		return 0;
+	if (along > TB_FOLLOW * e)
+		along = TB_FOLLOW * e;
+	*ly = ty - along * ey / e;
+	*lp = tp - along * ep / e;
+	return along;
+}
+
+// The slot of a released target, or -1.
+static int TouchBrk_Slot(const touch_brk_t *b, int ent)
+{
+	int i;
+	for (i = 0; i < TB_OUT; i++)
+		if (ent && b->out[i].ent == ent)
+			return i;
+	return -1;
 }
 
 // One frame. ty, tp: the player's own turn this frame; ey, ep: from the view
-// (before that turn) to the aim point of the target the pull was holding;
-// ent: that target, 0 when there was none. True when this frame releases it.
+// (before that turn) to the target the pull was holding; ent: that target, 0
+// when there was none. True when this frame releases it. Only a drag that
+// keeps going one way does: a wobble sums to nothing. Firing never asks this.
 static qbool TouchBrk_Step(touch_brk_t *b, const touch_brk_cfg_t *c, double now, float dt, float ty, float tp, int ent, float ey, float ep)
 {
-	float toward, away, rate;
+	float ly, lp, k, rate, flick;
+	int i, s;
 	if (dt <= 0)
 		return false;
-	away = TouchBrk_AwayPart(ty, tp, ey, ep, &toward);
-	rate = away / dt;
-	if (rate >= c->speed)
-	{
-		b->acc += away;
-		b->pull_off = now + TB_PULL_OFF;
-	}
-	else
-		b->acc *= (dt >= TB_DECAY ? 0.0f : 1.0f - dt / TB_DECAY);
+	if (!ent || ent != b->on)
+		b->acc_y = b->acc_p = 0; // a drag that brought the view here is not leaving it
+	b->on = ent;
 	if (!ent)
 		return false;
-	if (b->acc >= c->angle || rate >= c->flick)
+	TouchBrk_Toward(ty, tp, ey, ep, &ly, &lp);
+	rate = tb_len(ly, lp) / dt;
+	flick = tb_len(ly, lp) / (dt > TB_FLICK_DT ? dt : TB_FLICK_DT);
+	k = dt >= TB_DECAY ? 0.0f : 1.0f - dt / TB_DECAY;
+	b->acc_y *= k;
+	b->acc_p *= k;
+	if (rate >= c->speed)
 	{
-		b->ent = ent;
-		b->until = now + c->cooldown;
-		// and no other target pulls the view either until the drag has been over a while
-		if (b->pull_off < now + c->cooldown)
-			b->pull_off = now + c->cooldown;
-		b->acc = 0;
+		b->acc_y += ly;
+		b->acc_p += lp;
+	}
+	if (tb_len(b->acc_y, b->acc_p) >= c->angle || flick >= c->flick)
+	{
+		s = TouchBrk_Slot(b, ent);
+		for (i = 0; s < 0 && i < TB_OUT; i++)
+			if (!b->out[i].ent || b->out[i].until <= now)
+				s = i;
+		if (s < 0) // all taken: the one that ends first
+			for (s = 0, i = 1; i < TB_OUT; i++)
+				if (b->out[i].until < b->out[s].until)
+					s = i;
+		b->out[s].ent = ent;
+		b->out[s].until = now + c->cooldown;
+		b->acc_y = b->acc_p = 0;
 		return true;
 	}
 	return false;
@@ -278,30 +304,36 @@ static qbool TouchBrk_Step(touch_brk_t *b, const touch_brk_cfg_t *c, double now,
 // Whether the released target is still held out.
 static qbool TouchBrk_Held(const touch_brk_t *b, double now, int ent)
 {
-	return ent && ent == b->ent && now < b->until;
+	int s = TouchBrk_Slot(b, ent);
+	return s >= 0 && now < b->out[s].until;
 }
 
-// The pull and the friction stand down for every target.
-static qbool TouchBrk_PullOff(const touch_brk_t *b, double now)
+// A released target the drag is still moving away from stays released, or the
+// pull would take it back in the middle of the turn.
+static void TouchBrk_Leaving(touch_brk_t *b, const touch_brk_cfg_t *c, double now, float dt, int ent, float ty, float tp, float ey, float ep)
 {
-	return now < b->pull_off;
+	int s = TouchBrk_Slot(b, ent);
+	if (s >= 0 && dt > 0 && ty * ey + tp * ep < 0 && tb_len(ty, tp) / dt >= c->speed)
+		b->out[s].until = now + c->cooldown;
 }
 
 // The player turns back onto a released target: the turn this frame is toward
 // it, at least at the break speed, and the crosshair is within `ret` degrees of
 // its edge. gap: degrees from the view to its edge (0 on it). True and the
 // hold is dropped.
-static qbool TouchBrk_Return(touch_brk_t *b, const touch_brk_cfg_t *c, float dt, float ty, float tp, float ey, float ep, float gap)
+static qbool TouchBrk_Return(touch_brk_t *b, const touch_brk_cfg_t *c, float dt, int ent, float ty, float tp, float ey, float ep, float gap)
 {
-	float toward, away;
+	float ly, lp;
+	int s = TouchBrk_Slot(b, ent);
 	if (dt <= 0 || gap > c->ret)
 		return false;
-	away = TouchBrk_AwayPart(ty, tp, ey, ep, &toward);
-	(void)away;
-	if (toward / dt < c->speed)
+	if (TouchBrk_Toward(ty, tp, ey, ep, &ly, &lp) / dt < c->speed)
 		return false;
-	b->until = 0;
-	b->ent = 0;
+	if (s >= 0)
+	{
+		b->out[s].until = 0;
+		b->out[s].ent = 0;
+	}
 	return true;
 }
 

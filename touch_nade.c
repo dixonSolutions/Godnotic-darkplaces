@@ -92,6 +92,8 @@ int TouchNade_Buttons(void)
 	return tn.out ? 32 : 0; // button6, as +hook sends it
 }
 
+qbool TouchNade_Held(void) { return tn.out; }
+
 int TouchNade_State(void) { return tn.state; }
 float TouchNade_Timer(void) { return tn.timer; }
 int TouchNade_Bonus(void) { return tn.bonus; }

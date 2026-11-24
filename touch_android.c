@@ -147,6 +147,7 @@ void TouchAndroid_Background(qbool goaway)
 		Con_Printf("Android: in the background%s\n", netstate_busy ? ", staying connected" : "");
 		// The fingers and keys held when the app left never send their release.
 		TouchHUD_ReleaseAll();
+		TouchHUD_DropContacts();
 		Key_ReleaseAll();
 	}
 	else

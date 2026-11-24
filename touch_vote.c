@@ -13,6 +13,7 @@ stock selection screen. The chip is available throughout the match.
 */
 
 #include "quakedef.h"
+#include "touch_mention.h" // Touch: chat log fingers
 #include "csprogs.h"
 #include "touch_vote.h"
 #include "touch_vote_parse.h"
@@ -998,6 +999,8 @@ qbool TouchVote_Finger(int type, int id, float nx, float ny)
 	// The join handle and the match-end MENU (touch_hud.c) come first: this is
 	// the one hook vid_sdl.c calls for every finger before the finger table.
 	if (TouchHUD_OverlayFinger(type, id, nx, ny))
+		return true;
+	if (TouchChatLog_Finger(type, id, nx, ny)) // Touch: the chat feed's icons and names, and the open chat log
 		return true;
 	for (i = 0; i < MAX_CLAIMED; i++)
 		if (claimed[i].id == id)

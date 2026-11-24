@@ -17,6 +17,9 @@ struct lhnetaddress_s;
 struct client_s;
 
 void TouchNet_Init(void);
+// A getstatus reply's player block into a fixed buffer: as many whole lines as fit, never a warning
+// (a busy server's block is longer than the buffer). Returns the length copied.
+size_t TouchNet_CopyPlayerBlock(char *dst, size_t size, const char *src);
 
 // handshake (netconn.c)
 // client: add "\rwin\N" to the connect string

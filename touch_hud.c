@@ -22,6 +22,8 @@ applies to both.
 #include "touch_aim.h"
 #include "touch_hook.h"
 #include "touch_nade.h"
+#include "touch_dash.h"
+#include "touch_strip.h"
 #include "touch_turn.h"
 #include "touch_ui.h"
 #include "touch_altfire.h"
@@ -30,6 +32,7 @@ applies to both.
 #include "touch_topbar.h"
 #include "touch_cursor.h"
 #include "touch_feel.h"
+#include "touch_mention.h"
 
 extern cvar_t vid_touchscreen;
 extern cvar_t vid_conwidth;
@@ -231,15 +234,28 @@ static void shape_centered(cachepic_t *pic, float cx, float cy, float hx, float 
 		return;
 	if (Draw_IsPicLoaded(pic))
 		DrawQ_Pic(cx - hx, cy - hy, pic, hx * 2, hy * 2, rgb[0], rgb[1], rgb[2], alpha, 0);
-	else
-		DrawQ_Fill(cx - hx, cy - hy, hx * 2, hy * 2, rgb[0], rgb[1], rgb[2], alpha, 0);
+	else // Touch: no mask (headless, a basedir without gfx/touch): round, never a solid square behind a round button
+		DrawQ_RoundedBox(cx, cy, hx, hy, min(hx, hy), 0, rgb[0], rgb[1], rgb[2], alpha * 0.6f, 0);
 }
 // Discs, rings and capsules are geometry (DrawQ_RoundedBox): antialiased at any
 // size, and a border the same width all the way round. The masks are kept
 // for the soft shapes (glow, shadow).
 static void shape_disc(float cx, float cy, float r, const float *rgb, float a) { DrawQ_RoundedBox(cx, cy, r, r, r, 0, rgb[0], rgb[1], rgb[2], a, 0); }
-static void shape_glow(float cx, float cy, float r, const float *rgb, float a) { shape_centered(pic_disc_soft, cx, cy, r, r, rgb, a); }
-static void shape_shadow(float cx, float cy, float r, float a) { shape_centered(pic_shadow, cx, cy, r, r, C_SHADOW, a); }
+// Touch: the glow and the shade are stacked discs, not the soft masks: the masks drew as solid
+// squares behind every round button where their alpha is lost (Android, offscreen), and a
+// bright square behind a held DASH.
+static void shape_glow(float cx, float cy, float r, const float *rgb, float a)
+{
+	int i;
+	for (i = 0; i < 3; i++)
+		DrawQ_RoundedBox(cx, cy, r * (1.0f - 0.18f * i), r * (1.0f - 0.18f * i), r * (1.0f - 0.18f * i), 0, rgb[0], rgb[1], rgb[2], a * 0.4f, 0);
+}
+static void shape_shadow(float cx, float cy, float r, float a)
+{
+	int i;
+	for (i = 0; i < 3; i++)
+		DrawQ_RoundedBox(cx, cy, r * (1.0f - 0.08f * i), r * (1.0f - 0.08f * i), r * (1.0f - 0.08f * i), 0, C_SHADOW[0], C_SHADOW[1], C_SHADOW[2], a * 0.4f, 0);
+}
 static void shape_ring_stroke(float cx, float cy, float r, float stroke, const float *rgb, float a) { DrawQ_RoundedBox(cx, cy, r, r, r, stroke, rgb[0], rgb[1], rgb[2], a, 0); }
 static void shape_ring(float cx, float cy, float r, const float *rgb, float a) { shape_ring_stroke(cx, cy, r, r * W_RING_THIN, rgb, a); }
 
@@ -282,7 +298,12 @@ static void shape_capsule_from(cachepic_t *pic, float cx, float cy, float hx, fl
 static void shape_capsule(float cx, float cy, float hx, float hy, const float *rgb, float a) { DrawQ_RoundedBox(cx, cy, hx, hy, hy, 0, rgb[0], rgb[1], rgb[2], a, 0); }
 static void shape_capsule_ring_stroke(float cx, float cy, float hx, float hy, float stroke, const float *rgb, float a) { DrawQ_RoundedBox(cx, cy, hx, hy, hy, stroke, rgb[0], rgb[1], rgb[2], a, 0); }
 static void shape_capsule_ring(float cx, float cy, float hx, float hy, const float *rgb, float a) { shape_capsule_ring_stroke(cx, cy, hx, hy, hy * W_RING_THIN, rgb, a); }
-static void shape_capsule_shadow(float cx, float cy, float hx, float hy, float a) { shape_capsule_from(pic_shadow, cx, cy, hx, hy, C_SHADOW, a); }
+static void shape_capsule_shadow(float cx, float cy, float hx, float hy, float a)
+{
+	int i;
+	for (i = 0; i < 3; i++)
+		DrawQ_RoundedBox(cx, cy, hx * (1.0f - 0.03f * i), hy * (1.0f - 0.08f * i), hy * (1.0f - 0.08f * i), 0, C_SHADOW[0], C_SHADOW[1], C_SHADOW[2], a * 0.4f, 0);
+}
 
 static float label_width(float fs, const char *label)
 {
@@ -349,6 +370,26 @@ static float glass_body(qbool pressed)
 	return pressed ? max(body, 0.45f) : body;
 }
 
+// Overlay panels need a readable backing even when the HUD glass is hollow.
+void TouchHUD_GlassPanel(float x, float y, float w, float h, float radius, float alpha)
+{
+	float cx = x + w * 0.5f, cy = y + h * 0.5f;
+	float hx = w * 0.5f, hy = h * 0.5f;
+	float r = min(radius, min(hx, hy));
+	DrawQ_RoundedBox(cx, cy + r * 0.15f, hx + r * 0.12f, hy + r * 0.12f, r, 0, C_SHADOW[0], C_SHADOW[1], C_SHADOW[2], alpha * A_SHADOW * glass_body(false), 0);
+	DrawQ_RoundedBox(cx, cy, hx, hy, r, 0, C_SURFACE[0], C_SURFACE[1], C_SURFACE[2], alpha * (0.88f + 0.1f * glass_body(false)), 0);
+	DrawQ_RoundedBox(cx, cy, hx, hy, r, max(1.0f, r * W_RING_THIN), C_RIM[0], C_RIM[1], C_RIM[2], alpha * A_RIM * 0.6f, 0);
+}
+
+void TouchHUD_GlassControl(float cx, float cy, float hx, float hy, qbool pressed, qbool selected, float alpha)
+{
+	qbool active = pressed || selected;
+	const float *color = active ? C_ACCENT : C_SURFACE;
+	shape_capsule_shadow(cx, cy + elevation(min(hx, hy)), hx, hy, alpha * A_SHADOW * glass_body(false));
+	shape_capsule(cx, cy, hx, hy, color, alpha * (pressed ? A_SURFACE_ACTIVE : selected ? A_SURFACE_LATCH : A_SURFACE) * glass_body(active));
+	widget_capsule_rim(cx, cy, hx, hy, active ? C_ACCENT_LIGHT : C_RIM, alpha * (active ? A_RIM_ACTIVE : A_RIM));
+}
+
 static void widget_button(float cx, float cy, float r, const char *label, qbool pressed, float alpha, const float *accent)
 {
 	const float *surface = pressed ? accent : C_SURFACE;
@@ -395,27 +436,6 @@ static void widget_capsule(float cx, float cy, float hx, float hy, const char *l
 		shape_disc(pip_x, cy, pip_r, C_INK, alpha * A_INK);
 		shape_ring(pip_x, cy, pip_r * 1.5f, C_INK, alpha * A_RIM);
 	}
-}
-
-// As Touch_Widget_Check: a checkbox, hollow while off and filled with the
-// accent while on. Square corners: the engine has no rounded-rect ring.
-static void box_stroke(float cx, float cy, float hx, float hy, float w, const float *rgb, float a)
-{
-	DrawQ_Fill(cx - hx, cy - hy, hx * 2, w, rgb[0], rgb[1], rgb[2], a, 0);
-	DrawQ_Fill(cx - hx, cy + hy - w, hx * 2, w, rgb[0], rgb[1], rgb[2], a, 0);
-	DrawQ_Fill(cx - hx, cy - hy + w, w, hy * 2 - w * 2, rgb[0], rgb[1], rgb[2], a, 0);
-	DrawQ_Fill(cx + hx - w, cy - hy + w, w, hy * 2 - w * 2, rgb[0], rgb[1], rgb[2], a, 0);
-}
-static void widget_check(float cx, float cy, float hx, float hy, const char *label, qbool on, qbool pressed, float alpha, const float *accent)
-{
-	float b = widget_border();
-	if (hx < 2 || hy < 2 || alpha <= 0)
-		return;
-	if (on || pressed)
-		DrawQ_Fill(cx - hx, cy - hy, hx * 2, hy * 2, accent[0], accent[1], accent[2], alpha * A_SURFACE_ACTIVE, 0);
-	box_stroke(cx, cy, hx + b * 0.5f, hy + b * 0.5f, b * 2, C_SHADOW, alpha * A_CONTOUR);
-	box_stroke(cx, cy, hx, hy, b, on ? accent : C_RIM, alpha * (on ? A_RIM_ACTIVE : A_RIM));
-	shape_label(cx, cy, label_size(hx, hy, label), label, C_INK, alpha * A_INK);
 }
 
 static void widget_chrome_pill(float cx, float cy, float hx, float hy, const char *label, qbool pressed, float alpha, const float *accent)
@@ -511,6 +531,16 @@ static void set_key(const char *name, qbool *state, qbool down)
 }
 
 static void spec_release(void);
+
+// The contacts the finger table still holds when the app has been away: their
+// releases never come, and TouchHUD_ReleaseAll alone let the next frame claim
+// them again as new fingers (a held hook, grenade or FIRE stuck on).
+void TouchHUD_DropContacts(void)
+{
+	int i;
+	for (i = 0; i < TOUCHHUD_ENGINE_FINGERS - 1; i++)
+		multitouch[i][0] = 0;
+}
 
 void TouchHUD_ReleaseAll(void)
 {
@@ -655,14 +685,78 @@ static void TouchHUD_TestFinger_f(cmd_state_t *cmd)
 	}
 }
 
+static void TouchHUD_TestStrip_f(cmd_state_t *cmd);
+
+// Test hook: what the app leaving does to the fingers (touch_android.c).
+static void TouchHUD_TestAway_f(cmd_state_t *cmd)
+{
+	TouchHUD_ReleaseAll();
+	TouchHUD_DropContacts();
+}
+
 static void TouchHUD_TestView_f(cmd_state_t *cmd)
 {
 	Con_Printf("TESTVIEW yaw=%.2f pitch=%.2f\n", cl.viewangles[YAW], cl.viewangles[PITCH]);
 }
 
+static cvar_t touch_spectate_inputs = {CF_CLIENT | CF_ARCHIVE, "touch_spectate_inputs", "1", "show the followed player's inputs"};
+static int spec_test_mask = -1, spec_test_keyboard = -1;
+static unsigned int spec_draw_count;
+static qbool spec_inputs_mask(int *mask)
+{
+	prvm_prog_t *prog = CLVM_prog;
+	mdef_t *g;
+	int state = TouchUI_SpectatorState();
+	if (!touch_spectate_inputs.integer || (state != 2 && state != 3))
+		return false;
+	g = prog && prog->loaded ? PRVM_ED_FindGlobal(prog, "g_stat_PRESSED_KEYS") : NULL;
+	if (!g || prog->numglobals <= 0 || g->ofs >= (unsigned int)prog->numglobals)
+		return false;
+	*mask = (g->type & ~DEF_SAVEGLOBAL) == ev_float ? (int)PRVM_GLOBALFIELDFLOAT(g->ofs) : PRVM_GLOBALFIELDVALUE(g->ofs)->_int;
+	return true;
+}
+
+static void TouchHUD_TestInputs_f(cmd_state_t *cmd)
+{
+	int mask = -1;
+	if (Cmd_Argc(cmd) > 1)
+	{
+		spec_test_mask = atoi(Cmd_Argv(cmd, 1));
+		spec_test_keyboard = Cmd_Argc(cmd) > 2 ? atoi(Cmd_Argv(cmd, 2)) : -1;
+	}
+	spec_inputs_mask(&mask);
+	Con_Printf("SPECTATE_INPUTS status=%d live=%d injected=%d keyboard=%d draws=%u\n", TouchUI_SpectateeStatus(), mask, spec_test_mask, spec_test_keyboard, spec_draw_count);
+}
+
+static char spec_saved_panel[128];
+static cvar_t *spec_panel;
+void TouchHUD_SpecInputsBegin(void)
+{
+	int mask;
+	spec_panel = NULL;
+	if (!spec_inputs_mask(&mask))
+		return;
+	spec_panel = Cvar_FindVar(&cvars_all, "hud_panel_pressedkeys", ~0);
+	if (spec_panel)
+	{
+		dp_strlcpy(spec_saved_panel, spec_panel->string, sizeof(spec_saved_panel));
+		Cvar_SetQuick(spec_panel, "0");
+	}
+}
+void TouchHUD_SpecInputsEnd(void)
+{
+	if (spec_panel)
+	{
+		Cvar_SetQuick(spec_panel, spec_saved_panel);
+		spec_panel = NULL;
+	}
+}
+
 void TouchHUD_Init(void)
 {
 	TouchHudMode_Init();
+	Cvar_RegisterVariable(&touch_spectate_inputs);
+	Cmd_AddCommand(CF_CLIENT, "_touch_test_spectate_inputs", TouchHUD_TestInputs_f, "test hook: mask and keyboard override, -1 disables");
 	Cvar_RegisterVariable(&touch_viewmodel_restored);
 	Cvar_RegisterVariable(&cl_touch_weplist_scale);
 	Cvar_RegisterVariable(&touch_topbar_auto);
@@ -674,6 +768,8 @@ void TouchHUD_Init(void)
 	Cmd_AddCommand(CF_CLIENT, "touch_move", TouchMove_f, "the touch stick's analog move from the CSQC HUD: touch_move <x right> <y down>, length 0..1");
 	Cmd_AddCommand(CF_CLIENT, "_touch_cancel_join", TouchHUD_CancelJoin_f, "stop a connect attempt (CANCEL on the loading screen)");
 	Cmd_AddCommand(CF_CLIENT, "_touch_test_finger", TouchHUD_TestFinger_f, "test hook: _touch_test_finger <slot> <0|1> [x y] puts a finger down or up");
+	Cmd_AddCommand(CF_CLIENT, "_touch_test_away", TouchHUD_TestAway_f, "test hook: release every finger as the app going to the background does");
+	Cmd_AddCommand(CF_CLIENT, "_touch_test_strip", TouchHUD_TestStrip_f, "test hook: print where the weapon strip's HOOK and NADE bands are (0..1)");
 	Cmd_AddCommand(CF_CLIENT, "_touch_test_view", TouchHUD_TestView_f, "test hook: print the view angles");
 	Cmd_AddCommand(CF_CLIENT, "_touch_restore_viewmodel", TouchHUD_RestoreViewmodel_f, "turn r_drawviewmodel back on once for installs that archived the old forced 0 (queued by Host_Init)");
 }
@@ -871,7 +967,7 @@ static void topbar_sync(void)
 	panel_place("timer", 0.440f, 0.004f, 0.120f, 0.052f);
 	panel_place("modicons", 0.430f, 0.060f, 0.140f, 0.060f);
 	panel_place("vote", 0.400f, 0.125f, 0.200f, 0.085f);
-	panel_place("radar", 0.280f, 0.004f, 0.140f, 0.200f);
+	panel_place("radar", 0.280f, 0.015f, 0.140f, 0.200f);
 	panel_place("chat", 0.020f, 0.230f, 0.290f, 0.190f);
 	// item timers (spectators by default): off the chat feed, on the right
 	// edge under the scores, where a spectator has no weapon strip
@@ -969,7 +1065,7 @@ static int num_weapons = 0;
 // code), -1 on any other server: touch_altfire.h then judges from the stock
 // balance.
 static int stat_altfire = -1;
-static float fire2_fade, zoom_fade, hook_fade;
+static float fire2_fade, zoom_fade;
 // The CSQC's viewmodels[0] (the wepent) tells the held weapon and its clip,
 // which no stat does: global offset plus the fields read from it each frame.
 typedef struct qcfield_s { int ofs; int type; } qcfield_t;
@@ -1279,8 +1375,8 @@ static float skin_pic_fit(cachepic_t *pic, float cx, float cy, float box_w, floa
 // Tallest the plate may be, and the band it stays inside, as parts of the
 // screen height: from below the top row of pills (MENU, CHAT and the vote
 // chip at the end of it, touch_vote.c) to near the bottom edge.
-#define WEP_FIT_H 0.83f
-#define WEP_MARGIN_TOP 0.13f
+#define WEP_FIT_H 0.77f
+#define WEP_MARGIN_TOP 0.19f
 #define WEP_MARGIN_Y 0.04f
 // The grip's touch area reaches at least this far down, as a part of the
 // screen's short side.
@@ -1311,8 +1407,10 @@ typedef struct strip_s
 	float half_w, half_h;  // plate half size (rows, grip and pad)
 	float row_w, row_h, pad;
 	float top;             // first row's top
-	int nade;              // a NADE row under the weapons (the nades mutator)
+	int hook;              // the HOOK entry after the weapons (touch_hook.c)
+	int nade;              // a NADE action row under the list (the nades mutator)
 	float nade_top;        // its top
+	float act_h;           // its height
 	float grip_top;        // the grip's top (the last row's bottom)
 } strip_t;
 
@@ -1322,15 +1420,18 @@ static int strip_layout(strip_t *st)
 	float total, w = ui_w(), h = ui_h();
 	int i;
 	st->n = 0;
+	// The HOOK entry stands for the Hook weapon too (it is held, not selected),
+	// so that weapon is not also a row of its own.
+	st->hook = TouchHook_RowState() != TOUCH_HOOKROW_HIDDEN;
 	for (i = 0; i < num_weapons && st->n < MAX_WEAPONS; i++)
-		if (weapons[i].impulse >= 0 && weapon_owned(i))
+		if (weapons[i].impulse >= 0 && weapon_owned(i) && !(st->hook && !strcmp(weapons[i].name, "hook")))
 			st->index[st->n++] = i;
-	// The NADE row's place is kept for as long as the server has nades, so
-	// the weapon rows never move when a grenade comes or goes.
+	// The HOOK entry's and the NADE row's places are kept for as long as the
+	// server has a hook / nades, so the weapon rows never move when one comes or goes.
 	st->nade = TouchNade_State() != TOUCH_NADE_HIDDEN;
 	// Fit: a strip taller than WEP_FIT_H of the screen shrinks, draw and
 	// hit-test alike, so no row ever runs off it.
-	total = (st->n + st->nade) * WEP_ROW_H + WEP_GRIP_H + 2 * WEP_PAD;
+	total = TouchStrip_Units(st->n, st->hook, st->nade) + TSTRIP_GRIP_H + 2 * TSTRIP_PAD;
 	st->u = ui_scale() * weplist_scale();
 	if (total * st->u > WEP_FIT_H * h)
 		st->u = WEP_FIT_H * h / total;
@@ -1343,9 +1444,10 @@ static int strip_layout(strip_t *st)
 	st->cy = bound(WEP_MARGIN_TOP * h + st->half_h, st->cy, (1 - WEP_MARGIN_Y) * h - st->half_h);
 	st->cx = bound(st->half_w, st->cx, w - st->half_w);
 	st->top = st->cy - st->half_h + st->pad;
-	st->nade_top = st->top + st->n * st->row_h;
-	st->grip_top = st->top + (st->n + st->nade) * st->row_h;
-	return st->n;
+	st->act_h = TSTRIP_ACT_H * st->u;
+	st->nade_top = st->top + (st->n + st->hook) * st->row_h + TSTRIP_GAP * st->u;
+	st->grip_top = st->nade ? st->nade_top + st->act_h : st->top + (st->n + st->hook) * st->row_h;
+	return st->n + st->hook + st->nade;
 }
 
 // Whether this module draws the strip this frame: under a server's CSQC, in
@@ -1375,37 +1477,83 @@ static qbool grip_hit(float px, float py)
 		&& py >= st.grip_top && py <= st.grip_top + max(WEP_GRIP_H * st.u, WEP_GRIP_GRAB * screen_min());
 }
 
-// Tap on a strip row: the row's impulse, or -1. Same pad as Touch_Weapons_HitImpulse.
+// What a finger at (px, py) lands on in the strip (touch_strip.h): one band,
+// never two. *row is the weapon row for TSTRIP_WEAPON.
+static int strip_kind(float px, float py, int *row)
+{
+	strip_t st;
+	tstrip_t g;
+	int ns = TouchNade_State();
+	if (row)
+		*row = -1;
+	if (!strip_drawn() || strip_layout(&st) <= 0)
+		return TSTRIP_MISS;
+	g.n = st.n;
+	g.hook = st.hook;
+	g.hook_press = st.hook && (TouchHook_RowState() == TOUCH_HOOKROW_READY || TouchHook_RowState() == TOUCH_HOOKROW_HELD)
+		&& !role_owned(ROLE_NADE);
+	g.nade = st.nade;
+	g.nade_press = st.nade && (ns == TOUCH_NADE_READY || ns == TOUCH_NADE_COOKING) && !role_owned(ROLE_HOOK);
+	g.u = st.u;
+	g.cx = st.cx;
+	g.top = st.top;
+	g.row_w = st.row_w;
+	return TouchStrip_Hit(&g, px, py, row);
+}
+
+// Tap on a strip weapon row: the row's impulse, or -1.
 static int strip_hit(float px, float py)
 {
 	strip_t st;
-	float pad;
-	int i;
-	if (!strip_drawn() || strip_layout(&st) <= 0)
+	int row;
+	if (strip_kind(px, py, &row) != TSTRIP_WEAPON || strip_layout(&st) <= 0)
 		return -1;
-	pad = min(st.row_w, st.row_h) * 0.12f;
-	for (i = 0; i < st.n; i++)
-	{
-		float y = st.top + i * st.row_h;
-		if (px >= st.cx - st.row_w * 0.5f - pad && px <= st.cx + st.row_w * 0.5f + pad && py >= y - pad && py <= y + st.row_h + pad)
-			return weapons[st.index[i]].impulse;
-	}
-	return -1;
+	return weapons[st.index[row]].impulse;
 }
 
-// On the NADE row, while there is a grenade to throw or one cooking.
-static qbool nade_hit(float px, float py)
+// Test hook for the finger tests (scripts/test-touch-strip-live.sh):
+//   _touch_test_strip                         print where the strip's bands are (0..1 of the screen)
+//   _touch_test_strip <slot> <band> <frac>    put finger <slot> down in a band, <frac> 0..1 down it:
+//                                             hook, nade, gap (between the list and NADE), weapon<N>
+// The finger goes through the real finger table (assign_role), like a touch.
+static void TouchHUD_TestStrip_f(cmd_state_t *cmd)
 {
 	strip_t st;
-	float pad;
-	int state = TouchNade_State();
-	if (state != TOUCH_NADE_READY && state != TOUCH_NADE_COOKING)
-		return false;
-	if (!strip_drawn() || strip_layout(&st) <= 0 || !st.nade)
-		return false;
-	pad = min(st.row_w, st.row_h) * 0.12f;
-	return px >= st.cx - st.row_w * 0.5f - pad && px <= st.cx + st.row_w * 0.5f + pad
-		&& py >= st.nade_top - pad && py <= st.nade_top + st.row_h + pad;
+	float w = ui_w(), h = ui_h(), y0 = 0, y1 = 0;
+	if (!strip_drawn() || strip_layout(&st) <= 0)
+	{
+		Con_Print("STRIP none\n");
+		return;
+	}
+	if (Cmd_Argc(cmd) < 4)
+	{
+		Con_Printf("STRIP x=%.4f w0y=%.4f hooktop=%.4f hookbot=%.4f nadetop=%.4f nadebot=%.4f gripy=%.4f rowh=%.4f n=%d hook=%d nade=%d\n",
+			st.cx / w, (st.top + st.row_h * 0.5f) / h,
+			st.hook ? (st.top + st.n * st.row_h) / h : -1.0f, st.hook ? (st.top + (st.n + 1) * st.row_h) / h : -1.0f,
+			st.nade ? st.nade_top / h : -1.0f, st.nade ? (st.nade_top + st.act_h) / h : -1.0f,
+			st.grip_top / h, st.row_h / h, st.n, st.hook, st.nade);
+		return;
+	}
+	{
+		int slot = atoi(Cmd_Argv(cmd, 1));
+		const char *band = Cmd_Argv(cmd, 2);
+		float frac = bound(0.0f, (float)atof(Cmd_Argv(cmd, 3)), 0.999f);
+		if (slot < 0 || slot >= TOUCHHUD_ENGINE_FINGERS - 1)
+			return;
+		if (!strcmp(band, "hook"))
+			y0 = st.top + st.n * st.row_h, y1 = y0 + st.row_h;
+		else if (!strcmp(band, "nade"))
+			y0 = st.nade_top, y1 = st.nade_top + st.act_h;
+		else if (!strcmp(band, "gap"))
+			y0 = st.top + (st.n + st.hook) * st.row_h, y1 = st.nade_top;
+		else if (!strncmp(band, "weapon", 6))
+			y0 = st.top + atoi(band + 6) * st.row_h, y1 = y0 + st.row_h;
+		else
+			return;
+		multitouch[slot][0] = slot + 1;
+		multitouch[slot][1] = st.cx / w;
+		multitouch[slot][2] = (y0 + (y1 - y0) * frac) / h;
+	}
 }
 
 static void draw_rrect(float cx, float cy, float hx, float hy, const float *rgb, float a)
@@ -1428,9 +1576,10 @@ static void draw_weapon_strip(float a)
 	h = st.row_h;
 	w = st.row_w;
 	pad = st.pad;
-	num_fs = 12 * st.u * 0.8f;
+	num_fs = 12 * st.u;
 	num_slot = label_width(num_fs, "9");
-	draw_rrect(st.cx, st.cy, st.half_w, st.half_h, C_SURFACE, a * A_SURFACE * glass_body(false));
+	// Use the same glass body and rim as the other controls.
+	TouchHUD_GlassControl(st.cx, st.cy, st.half_w, st.half_h, false, false, a);
 	for (i = 0; i < st.n; i++)
 	{
 		const wepdef_t *wd = &weapons[st.index[i]];
@@ -1442,14 +1591,35 @@ static void draw_weapon_strip(float a)
 		float icon_left, icon_right;
 		char num[8];
 		if (current)
-			draw_rrect(st.cx, y, w * 0.5f, h * 0.5f, C_ACCENT, a * A_SURFACE_LATCH);
+			draw_rrect(st.cx, y, w * 0.5f, h * 0.5f, C_ACCENT, a * 0.72f);
 		dpsnprintf(num, sizeof(num), "%d", wd->impulse);
-		shape_label_right(left + num_slot, y, num_fs, num, C_INK, a * A_INK * 0.7f);
+		shape_label_right(left + num_slot, y, num_fs, num, C_INK, a * A_INK * 0.9f);
 		icon_left = left + num_slot + pad;
 		icon_right = st.cx + w * 0.5f - pad;
 		if (!skin_pic_fit(skin_pic(wd->pic), (icon_left + icon_right) * 0.5f, y, icon_right - icon_left, h - pad * 2,
 			a * (current ? A_INK : A_INK * 0.55f)))
 			shape_label((icon_left + icon_right) * 0.5f, y, num_fs, wd->name, C_INK, a * (current ? A_INK : A_INK * 0.55f));
+	}
+	// The HOOK entry, after the weapons: the hook is picked from this list.
+	// Held while the finger is down (or the fall rescue holds it); faint when
+	// the server has a hook but none is to hand (no fuel).
+	if (st.hook)
+	{
+		int rs = TouchHook_RowState();
+		float y = st.top + st.n * h + h * 0.5f, left = st.cx - w * 0.5f + pad;
+		float icon_left = left + num_slot + pad, icon_right = st.cx + w * 0.5f - pad;
+		int wi;
+		const wepdef_t *hw = NULL;
+		float ia = rs == TOUCH_HOOKROW_EMPTY ? A_INK * 0.25f : (rs == TOUCH_HOOKROW_HELD ? A_INK : A_INK * 0.55f);
+		if (rs == TOUCH_HOOKROW_HELD || role_owned(ROLE_HOOK))
+			draw_rrect(st.cx, y, w * 0.5f, h * 0.5f, C_ACCENT, a * 0.72f);
+		for (wi = 0; wi < num_weapons; wi++)
+			if (!strcmp(weapons[wi].name, "hook"))
+				hw = &weapons[wi];
+		shape_label_right(left + num_slot, y, num_fs, "H", C_INK, a * ia * 0.7f);
+		// the Hook weapon's own icon, with the word beside it where there is room
+		if (!hw || !skin_pic_fit(skin_pic(hw->pic), (icon_left + icon_right) * 0.5f, y, icon_right - icon_left, h - pad * 2, a * ia))
+			shape_label((icon_left + icon_right) * 0.5f, y, num_fs, "HOOK", C_INK, a * ia);
 	}
 	// The NADE row: the grenade icon and its bonus count; while it cooks, the
 	// fuse spent fills it from the left, turning red near the end; while the
@@ -1457,35 +1627,34 @@ static void draw_weapon_strip(float a)
 	if (st.nade)
 	{
 		int state = TouchNade_State(), bonus = TouchNade_Bonus();
-		float y = st.top + st.n * h + h * 0.5f, left = st.cx - w * 0.5f + pad;
+		float y = st.nade_top + st.act_h * 0.5f, ah = st.act_h, left = st.cx - w * 0.5f + pad;
 		float icon_left = left + num_slot + pad, icon_right = st.cx + w * 0.5f - pad;
 		float ia = state == TOUCH_NADE_WAITING ? A_INK * 0.25f : A_INK;
 		if (state == TOUCH_NADE_COOKING)
 		{
 			float t = TouchNade_Timer();
 			const float *c = t > 0.6f ? C_DANGER : C_ACCENT;
-			DrawQ_Fill(st.cx - w * 0.5f, y - h * 0.5f, w * t, h, c[0], c[1], c[2], a * A_SURFACE_ACTIVE, 0);
+			DrawQ_Fill(st.cx - w * 0.5f, y - ah * 0.5f, w * t, ah, c[0], c[1], c[2], a * A_SURFACE_ACTIVE, 0);
 		}
 		else if (role_owned(ROLE_NADE))
-			draw_rrect(st.cx, y, w * 0.5f, h * 0.5f, C_ACCENT, a * A_SURFACE_LATCH);
+			draw_rrect(st.cx, y, w * 0.5f, ah * 0.5f, C_ACCENT, a * 0.72f);
 		if (bonus > 0)
 		{
 			char num[8];
 			dpsnprintf(num, sizeof(num), "%d", bonus);
 			shape_label_right(left + num_slot, y, num_fs, num, C_INK, a * ia);
 		}
-		if (!skin_pic_fit(skin_pic("nade_normal"), (icon_left + icon_right) * 0.5f, y, icon_right - icon_left, h - pad * 2, a * ia))
+		if (!skin_pic_fit(skin_pic("nade_normal"), (icon_left + icon_right) * 0.5f, y, icon_right - icon_left, ah - pad * 2, a * ia))
 			shape_label((icon_left + icon_right) * 0.5f, y, num_fs, "NADE", C_INK, a * ia);
 	}
-	// The grip: two short lines across the middle of its band.
+	// The grip: one pill, the drag handle of a bottom sheet.
 	if (grip_shown())
 	{
 		float gy = st.grip_top + WEP_GRIP_H * st.u * 0.5f;
-		float lw = w * 0.36f, lh = max(1.0f, st.u * 1.2f), gap = st.u * 2.0f;
+		float lw = w * 0.4f, lh = max(2.0f, st.u * 3.0f);
 		qbool held_grip = role_owned(ROLE_WEPGRIP);
-		float ga = a * (held_grip ? A_INK : A_INK * 0.45f);
-		DrawQ_Fill(st.cx - lw * 0.5f, gy - gap - lh * 0.5f, lw, lh, C_INK[0], C_INK[1], C_INK[2], ga, 0);
-		DrawQ_Fill(st.cx - lw * 0.5f, gy + gap - lh * 0.5f, lw, lh, C_INK[0], C_INK[1], C_INK[2], ga, 0);
+		float ga = a * (held_grip ? A_INK : A_INK * 0.55f);
+		shape_capsule(st.cx, gy, lw * 0.5f, lh * 0.5f, held_grip ? C_ACCENT : C_INK, ga);
 	}
 }
 
@@ -1614,10 +1783,19 @@ static int assign_role(float px, float py)
 	// (Touch_Weapons_Hit).
 	if (grip_hit(px, py))
 		return role_owned(ROLE_WEPGRIP) ? ROLE_IGNORED : ROLE_WEPGRIP;
-	if (nade_hit(px, py))
+	switch (strip_kind(px, py, NULL))
+	{
+	case TSTRIP_NADE:
 		return role_owned(ROLE_NADE) ? ROLE_IGNORED : ROLE_NADE;
-	if (strip_hit(px, py) >= 0)
+	case TSTRIP_HOOK:
+		return role_owned(ROLE_HOOK) ? ROLE_IGNORED : ROLE_HOOK;
+	case TSTRIP_WEAPON:
 		return ROLE_WEPSTRIP;
+	case TSTRIP_DEAD:
+		return ROLE_IGNORED; // a row (or the gap) that cannot be pressed now keeps the finger: no neighbour gets it
+	default:
+		break;
+	}
 	if (in_edge_deadzone(px, py))
 		return ROLE_IGNORED;
 	if (!cv("vid_mouse_confirmed", 0) && cv("touch_fire_visible", 1) && hit_circle(px, py, cv("touch_fire_x", 0.855f), cv("touch_fire_y", 0.680f), cv("touch_fire_size", 0.160f), 1.15f))
@@ -1634,8 +1812,6 @@ static int assign_role(float px, float py)
 		return ROLE_WEAPON;
 	if (zoom_available() && hit_circle(px, py, cv("touch_zoom_x", 0.860f), cv("touch_zoom_y", 0.480f), cv("touch_zoom_size", 0.100f), 1.10f))
 		return ROLE_ZOOM;
-	if (TouchHook_ButtonShown() && hit_circle(px, py, cv("touch_hook_x", 0.765f), cv("touch_hook_y", 0.615f), cv("touch_hook_size", 0.100f), 1.10f))
-		return ROLE_HOOK;
 	if (TouchTurn_ButtonShown() && hit_circle(px, py, cv("touch_turn_x", 0.300f), cv("touch_turn_y", 0.840f), cv("touch_turn_size", 0.085f), 1.10f))
 		return ROLE_TURN;
 	if (cv("touch_reload_visible", 0) && hit_circle(px, py, cv("touch_reload_x", 0.720f), cv("touch_reload_y", 0.480f), cv("touch_reload_size", 0.100f), 1.10f))
@@ -2368,7 +2544,8 @@ void TouchHUD_Frame(void)
 			if (f->role == ROLE_WEPGRIP)
 			{
 				strip_t st;
-				f->grab_n = strip_layout(&st);
+				strip_layout(&st);
+				f->grab_n = (int)(TouchStrip_Units(st.n, st.hook, st.nade) + 0.5f);
 				f->grab_u = st.u;
 			}
 			if (f->role == ROLE_RELOAD)
@@ -2376,7 +2553,7 @@ void TouchHUD_Frame(void)
 			if (f->role == ROLE_TURN)
 				TouchTurn_Start(); // on the press: nothing to undo
 			if (f->role == ROLE_DODGE)
-				Cbuf_AddText(cmd_local, "+dodge\n-dodge\n"); // a press and release in one frame would never be seen
+				TouchDash_Press(now); // Touch: the smart DASH (touch_dash.c): a dodge or a weapon boost
 		}
 		else
 		{
@@ -2388,6 +2565,8 @@ void TouchHUD_Frame(void)
 			f->last_x = px;
 			f->last_y = py;
 			f->first_frame = false;
+			if (f->role == ROLE_DODGE)
+				TouchDash_Hold(px, py, now - f->down_time); // Touch: long-press picker
 		}
 		f->lost_time = 0;
 	}
@@ -2409,6 +2588,8 @@ void TouchHUD_Frame(void)
 		if (now - f->lost_time < grace)
 			continue;
 		// released
+		if (f->role == ROLE_DODGE)
+			TouchDash_Release(f->last_x, f->last_y); // Touch: a tap acts on release
 		if (f->role == ROLE_CON || f->role == ROLE_CHAT || f->role == ROLE_PAUSE)
 			pill_release(f);
 		else if (f->role == ROLE_TOSPEC || f->role == ROLE_READY)
@@ -2511,7 +2692,7 @@ void TouchHUD_Frame(void)
 		{
 			// The grip follows the finger: the plate grows by twice the drag,
 			// since it is anchored at its centre.
-			float u_new = f->grab_u + 2 * (f->last_y - f->down_y) / (f->grab_n * WEP_ROW_H + WEP_GRIP_H);
+			float u_new = f->grab_u + 2 * (f->last_y - f->down_y) / (f->grab_n + WEP_GRIP_H);
 			float scale = bound(WEP_SCALE_MIN, u_new / ui_scale(), WEP_SCALE_MAX);
 			if (fabs(scale - cl_touch_weplist_scale.value) > 0.001f)
 			{
@@ -2814,6 +2995,40 @@ static void draw_circle_widget(const char *xk, float dx, const char *yk, float d
 	widget_button(cx, cy, widget_radius(cv(sk, ds)), label, pressed, a, accent);
 }
 
+// Touch: what a tap on DASH would do, under the button, and the long-press
+// picker (touch_dash.c decides; this only draws).
+static void draw_dash_extras(float a)
+{
+	float cx, cy, r;
+	const char *label;
+	touch_dash_chip_t chips[10];
+	int n, i;
+	widget_center(cv("touch_dodge_x", 0.165f), cv("touch_dodge_y", 0.480f), &cx, &cy);
+	r = widget_radius(cv("touch_dodge_size", 0.100f));
+	TouchDash_NoteButton(cx, cy, r);
+	label = TouchDash_Label();
+	if (label[0] && !TouchDash_PickerOpen())
+	{
+		// as wide as the text and a margin each side
+		float lhy = r * 0.32f, lhx = max(r * 0.95f, lhy * (0.8f + 0.27f * (float)strlen(label)));
+		widget_capsule(cx, cy - r * 1.45f, lhx, lhy, label, false, false, a * 0.85f, C_ACCENT);
+	}
+	n = TouchDash_Chips(chips, 10);
+	{
+		touch_dash_rowlabel_t rl[2];
+		int k, nl = TouchDash_RowLabels(rl, 2);
+		for (k = 0; k < nl; k++)
+			DrawQ_String(rl[k].x, rl[k].y - rl[k].size * 0.5f, rl[k].text, 0, rl[k].size, rl[k].size, C_INK[0], C_INK[1], C_INK[2], a * 0.8f, 0, NULL, false, FONT_CHAT);
+	}
+	for (i = 0; i < n; i++)
+	{
+		// the choice in force is a ring round the chip, never a mark over its text
+		widget_capsule(chips[i].x, chips[i].y, chips[i].hx, chips[i].hy, chips[i].label, chips[i].hot, false, a, C_ACCENT);
+		if (chips[i].current)
+			shape_capsule_ring_stroke(chips[i].x, chips[i].y, chips[i].hx + chips[i].hy * 0.14f, chips[i].hy + chips[i].hy * 0.14f, chips[i].hy * 0.16f, C_ACCENT, a * A_RIM_ACTIVE);
+	}
+}
+
 static void draw_pill(const char *xk, float dx, const char *yk, float dy, const char *sk, float ds, const char *ak, float da, const char *label, qbool pressed, float a)
 {
 	float cx, cy, hx, hy;
@@ -2877,7 +3092,7 @@ qbool TouchHUD_HideStockKeyPanel(prvm_prog_t *prog)
 	{
 		mfunction_t *f = i < 0 ? prog->xfunction : prog->stack[i].f;
 		const char *name = f ? PRVM_GetString(prog, f->s_name) : "";
-		if (TouchSpec_HideStockPanel(name, 1, 1, 0, 1))
+		if (strcmp(name, "HUD_PressedKeys") && TouchSpec_HideStockPanel(name, 1, 1, 0, 1))
 		{
 			static int reported;
 			int bit = !strcmp(name, "HUD_InfoMessages") ? 1 : 2;
@@ -2974,7 +3189,7 @@ static int spec_action_role(int action)
 static int assign_spec_role(float px, float py)
 {
 	int state = TouchUI_SpectatorState(), part, role = pill_at(px, py);
-	float cx, cy, hx, hy, r;
+	float cx, cy, r;
 	if (role != ROLE_NONE)
 		return role;
 	if (in_edge_deadzone(px, py))
@@ -3441,12 +3656,102 @@ static void draw_chrome(float a)
 		draw_pill("touch_con_x", 0.090f, "touch_con_y", 0.948f, "touch_con_size", 0.060f, "touch_con_aspect", 2.9f, "CONSOLE", role_owned(ROLE_CON), ca);
 }
 
+static void draw_spectate_inputs(void)
+{
+	static const char *commands[] = {"+forward", "+back", "+moveleft", "+moveright", "+jump", "+crouch", "+fire", "+fire2"};
+	static const char *labels[] = {"FIRE", "ALT", "JUMP", "CROUCH"};
+	static const int bits[] = {64, 128, 16, 32};
+	static const float col[] = {1, 1, 0, 2, 3, 4, 5, 6};
+	static const float row[] = {0, 1, 1, 1, 1, 1, 1, 1};
+	int mask, i;
+	float in_l = 0, in_t = 0, in_r = 0, in_b = 0, density = 0;
+	float u = ui_h() / 360.0f, x, y, px2con;
+	const char *insets = Cvar_VariableString(&cvars_all, "_touch_safe_insets", ~0);
+	qbool keyboard;
+	if (!in_play() || cl.intermission || cursor_wanted() || TouchChatLog_PanelHasInput())
+		return;
+	if (!spec_inputs_mask(&mask))
+		return;
+	if (spec_test_mask >= 0)
+		mask = spec_test_mask;
+	if (insets && insets[0])
+		sscanf(insets, "%f %f %f %f %f", &in_l, &in_t, &in_r, &in_b, &density);
+	px2con = vid.mode.width > 0 ? ui_w() / vid.mode.width : 1.0f;
+	x = (in_l * px2con + ui_w() - in_r * px2con) * 0.5f;
+	y = min(ui_h() * 0.83f, ui_h() - in_b * px2con - 8 * u);
+	keyboard = spec_test_keyboard >= 0 ? spec_test_keyboard != 0 : VID_HasKeyboard();
+	shapes_probe();
+	spec_draw_count++;
+	if (keyboard)
+	{
+		for (i = 0; i < 8; i++)
+		{
+			int keys[MAX_KEYS], key;
+			char buf[64];
+			const char *name;
+			Key_FindKeysForCommand(commands[i], keys, MAX_KEYS, -1);
+			key = keys[0];
+			if (i >= 6)
+			{
+				int j;
+				for (j = 0; j < MAX_KEYS && keys[j] >= 0; j++)
+					if (keys[j] == K_MOUSE1 || keys[j] == K_MOUSE2)
+					{
+						key = keys[j];
+						break;
+					}
+			}
+			if (key == K_MOUSE1)
+				name = "M1";
+			else if (key == K_MOUSE2)
+				name = "M2";
+			else if (key >= 0)
+				name = Key_KeynumToString(key, buf, sizeof(buf));
+			else
+				name = "-";
+			if (name[0] >= 'a' && name[0] <= 'z' && !name[1])
+			{
+				buf[0] = name[0] - 'a' + 'A';
+				buf[1] = 0;
+				name = buf;
+			}
+			{
+				float cx = x + (col[i] - 3) * 23 * u;
+				float cy = y - (1 - row[i]) * 23 * u - 11 * u;
+				float fs = label_size(10 * u, 10 * u, name);
+				float width = label_width(fs, name);
+				if (width > 17 * u)
+					fs *= 17 * u / width;
+				DrawQ_RoundedBox(cx, cy, 10 * u, 10 * u, 3 * u, 0, (mask & (1 << i)) ? C_ACCENT[0] : C_SURFACE[0], (mask & (1 << i)) ? C_ACCENT[1] : C_SURFACE[1], (mask & (1 << i)) ? C_ACCENT[2] : C_SURFACE[2], 0.9f, 0);
+				DrawQ_RoundedBox(cx, cy, 10 * u, 10 * u, 3 * u, max(1.0f, u), (mask & (1 << i)) ? C_ACCENT[0] : C_RIM[0], (mask & (1 << i)) ? C_ACCENT[1] : C_RIM[1], (mask & (1 << i)) ? C_ACCENT[2] : C_RIM[2], 0.9f, 0);
+				shape_label(cx, cy, fs, name, C_INK, 0.9f);
+			}
+		}
+	}
+	else
+	{
+		float cx = x - 35 * u, cy = y - 26 * u, r = 23 * u;
+		float dx = ((mask & 8) != 0) - ((mask & 4) != 0);
+		float dy = ((mask & 2) != 0) - ((mask & 1) != 0);
+		if (dx && dy)
+		{
+			dx *= 0.7071f;
+			dy *= 0.7071f;
+		}
+		widget_button(cx, cy, r, "", false, 0.9f, C_ACCENT);
+		widget_button(cx + dx * 11 * u, cy + dy * 11 * u, 9 * u, "", dx || dy, 0.9f, C_ACCENT);
+		for (i = 0; i < 4; i++)
+			widget_button(x + 6 * u + (i % 2) * 32 * u, y - 40 * u + (i / 2) * 29 * u, 13 * u, labels[i], (mask & bits[i]) != 0, 0.9f, C_ACCENT);
+	}
+}
+
 void TouchHUD_Draw(void)
 {
 	float a;
 	float cx, cy, hx, hy;
 	frames_drawn++;
 	TouchHudMode_Update();
+	draw_spectate_inputs();
 	TouchDodge_DrawCue(); // over the port's CSQC HUD too
 	draw_endmenu();
 	if (TouchMode_IsMatchEnd(hud_mode()))
@@ -3504,7 +3809,7 @@ void TouchHUD_Draw(void)
 	{
 		widget_center(cv("touch_hoplock_x", 0.675f), cv("touch_hoplock_y", 0.760f), &cx, &cy);
 		widget_half(cv("touch_hoplock_size", 0.052f), 1, &hx, &hy);
-		widget_check(cx, cy, hx, hy, "KEEP", hop_latched, role_owned(ROLE_HOPLOCK), a, C_ACCENT);
+		widget_capsule(cx, cy, hx, hy, "KEEP", role_owned(ROLE_HOPLOCK), hop_latched, a, C_ACCENT);
 	}
 	if (cv("touch_crouch_visible", 1))
 		draw_circle_widget("touch_crouch_x", 0.700f, "touch_crouch_y", 0.885f, "touch_crouch_size", 0.080f, "DUCK", key_crouch, a, C_ACCENT);
@@ -3523,18 +3828,16 @@ void TouchHUD_Draw(void)
 			draw_circle_widget("touch_fire2_x", 0.770f, "touch_fire2_y", 0.755f, "touch_fire2_size", 0.100f, "ALT", key_attack2, a * fire2_fade, C_DANGER);
 		if (zoom_fade > 0)
 			draw_circle_widget("touch_zoom_x", 0.860f, "touch_zoom_y", 0.480f, "touch_zoom_size", 0.100f, "ZOOM", key_zoom, a * zoom_fade, C_ACCENT);
-		// HOOK fades the same way: there while a hook is to hand
-		// (touch_hook_visible 2), and while it is held
-		hook_fade = cv("touch_hook_visible", 2) > 0 ? TouchAltFire_Fade(hook_fade, TouchHook_ButtonShown() || TouchHook_Held(), fade_dt) : 0;
-		if (hook_fade > 0)
-			draw_circle_widget("touch_hook_x", 0.765f, "touch_hook_y", 0.615f, "touch_hook_size", 0.100f, "HOOK", TouchHook_Held(), a * hook_fade, C_ACCENT);
 	}
 	if (TouchTurn_ButtonShown())
 		draw_circle_widget("touch_turn_x", 0.300f, "touch_turn_y", 0.840f, "touch_turn_size", 0.085f, "TURN", TouchTurn_Spinning() || role_owned(ROLE_TURN), a, C_ACCENT);
 	if (cv("touch_reload_visible", 0))
 		draw_circle_widget("touch_reload_x", 0.720f, "touch_reload_y", 0.480f, "touch_reload_size", 0.100f, "RLD", role_owned(ROLE_RELOAD), a, C_ACCENT);
 	if (cv("touch_dodge_visible", 0))
+	{
 		draw_circle_widget("touch_dodge_x", 0.165f, "touch_dodge_y", 0.480f, "touch_dodge_size", 0.100f, "DASH", role_owned(ROLE_DODGE), a, C_ACCENT);
+		draw_dash_extras(a); // Touch: indicator and picker
+	}
 
 	// Readouts draw only for a live player, like Touch_Hud_Draw.
 	if (cl.stats[STAT_HEALTH] > 0)
@@ -3676,8 +3979,6 @@ void TouchHUD_PrintRects(void)
 		rect_circle("TURN", "touch_turn_x", 0.300f, "touch_turn_y", 0.840f, "touch_turn_size", 0.085f);
 	if (cv("touch_zoom_visible", 2) > 0)
 		rect_circle("ZOOM", "touch_zoom_x", 0.860f, "touch_zoom_y", 0.480f, "touch_zoom_size", 0.100f);
-	if (cv("touch_hook_visible", 2) > 0)
-		rect_circle("HOOK", "touch_hook_x", 0.765f, "touch_hook_y", 0.615f, "touch_hook_size", 0.100f);
 	if (readouts_shown())
 	{
 		float hud_u = ui_scale() * max(0.4f, cv("touch_hud_scale", 0.85f));
