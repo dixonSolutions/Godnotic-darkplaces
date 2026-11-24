@@ -3153,7 +3153,7 @@ static void spec_release(void)
 
 // The spectator bar: three parts side by side, bottom right under the right
 // thumb (mirrored left-handed). Secondary size, a 48 dp row.
-static void spec_bar_layout(touchspec_bar_rect_t r[TOUCHSPEC_BAR_PARTS])
+static void spec_bar_layout_join(touchspec_bar_rect_t r[TOUCHSPEC_BAR_PARTS], qbool join)
 {
 	float u = dp_units(), bx, by, base;
 	widget_center(cv("touch_specbar_x", 0.460f), cv("touch_specbar_y", 0.930f), &bx, &by);
@@ -3171,10 +3171,15 @@ static void spec_bar_layout(touchspec_bar_rect_t r[TOUCHSPEC_BAR_PARTS])
 			if (dx > ui_w() * 0.5f) hi = dx - dr;
 			else lo = dx + dr;
 		}
-		TouchSpec_BarLayout(hi - lo, ui_h(), bx - lo, by, base, u, spec_join_shown(), r);
+		TouchSpec_BarLayout(hi - lo, ui_h(), bx - lo, by, base, u, join, r);
 		for (part = 0; part < TOUCHSPEC_BAR_PARTS; part++)
 			r[part].cx += lo;
 	}
+}
+
+static void spec_bar_layout(touchspec_bar_rect_t r[TOUCHSPEC_BAR_PARTS])
+{
+	spec_bar_layout_join(r, spec_join_shown());
 }
 
 // The bar part under a point: the one test the drawn bar and the desk strip
@@ -3301,6 +3306,82 @@ static void spec_frame(qbool *fire, qbool *fire2, qbool *jump)
 	}
 	set_key("moveup", &key_moveup, up && TouchSpec_StickShown(state));
 	set_key("movedown", &key_movedown, down && TouchSpec_StickShown(state));
+}
+
+// The key to show for a command: a mouse button first when a mouse is there,
+// a keyboard key otherwise (a tablet's keyboard cover has no mouse).
+static const char *spec_key_name(const char *command, char *buf, size_t size)
+{
+	int keys[MAX_KEYS], j, key = -1;
+	qbool mouse = cv("vid_mouse_confirmed", 0) != 0;
+	const char *name;
+	Key_FindKeysForCommand(command, keys, MAX_KEYS, -1);
+	for (j = 0; j < MAX_KEYS && keys[j] >= 0; j++)
+	{
+		qbool is_mouse = keys[j] >= K_MOUSE1 && keys[j] < K_JOY1;
+		if (keys[j] >= K_JOY1 || (is_mouse && !mouse))
+			continue;
+		if (key < 0 || (is_mouse && mouse && !(key >= K_MOUSE1 && key < K_JOY1)))
+			key = keys[j];
+	}
+	if (key < 0)
+		return NULL;
+	if (key == K_MWHEELUP)
+		return "WHEEL+";
+	if (key == K_MWHEELDOWN)
+		return "WHEEL-";
+	if (key >= K_MOUSE1 && key < K_MOUSE1 + 9)
+	{
+		dpsnprintf(buf, size, "M%d", key - K_MOUSE1 + 1);
+		return buf;
+	}
+	name = Key_KeynumToString(key, buf, size);
+	if (name && name[0] >= 'a' && name[0] <= 'z' && !name[1])
+	{
+		char c = name[0] - 'a' + 'A';
+		buf[0] = c;
+		buf[1] = 0;
+		name = buf;
+	}
+	// UPARROW and the like: the first word is enough
+	if (name && strlen(name) > 5 && !strcmp(name + strlen(name) - 5, "ARROW"))
+	{
+		if (name != buf)
+			dp_strlcpy(buf, name, size);
+		buf[strlen(buf) - 5] = 0;
+		name = buf;
+	}
+	return name;
+}
+
+// One glass keycap, the same material as the round buttons, lit when held.
+static void spec_keycap(float cx, float cy, float hx, float hy, const char *name, qbool held, float a)
+{
+	const float *c = held ? C_ACCENT : C_SURFACE, *rim = held ? C_ACCENT : C_RIM;
+	float r = hy * 0.38f, fs = label_size(hx, hy, name), w = label_width(fs, name);
+	if (w > hx * 1.7f)
+		fs *= hx * 1.7f / w;
+	DrawQ_RoundedBox(cx, cy + hy * 0.10f, hx, hy, r, 0, C_SHADOW[0], C_SHADOW[1], C_SHADOW[2], a * A_SHADOW * glass_body(held), 0);
+	DrawQ_RoundedBox(cx, cy, hx, hy, r, 0, c[0], c[1], c[2], a * (held ? A_SURFACE_ACTIVE : A_SURFACE) * glass_body(held), 0);
+	DrawQ_RoundedBox(cx, cy, hx, hy, r, max(1.0f, hy * 0.07f), rim[0], rim[1], rim[2], a, 0);
+	shape_label(cx, cy, fs, name, C_INK, a);
+}
+
+// The bound key as a small cap on a button's corner; nothing when unbound.
+static void spec_keybadge(float cx, float cy, float half, const char *command, qbool held, float a)
+{
+	char buf[64];
+	const char *name = spec_key_name(command, buf, sizeof(buf));
+	float hx;
+	if (!name || !name[0])
+		return;
+	hx = max(half, half * (0.45f + 0.36f * (float)strlen(name)));
+	spec_keycap(cx, cy, hx, half, name, held, a);
+}
+
+static qbool spec_keys_shown(void)
+{
+	return touch_spectate_inputs.integer && (spec_test_keyboard >= 0 ? spec_test_keyboard != 0 : VID_HasKeyboard());
 }
 
 static void draw_spec_bar(int state, float a)
@@ -3699,27 +3780,44 @@ static void draw_chrome(float a)
 		draw_pill("touch_con_x", 0.090f, "touch_con_y", 0.948f, "touch_con_size", 0.060f, "touch_con_aspect", 2.9f, "CONSOLE", role_owned(ROLE_CON), ca);
 }
 
+// The bar's keys, drawn here under any CSQC: ours draws its own bar, same layout.
+static void draw_spec_barkeys(void)
+{
+	touchspec_bar_rect_t r[TOUCHSPEC_BAR_PARTS];
+	qbool join;
+	int part, state = TouchUI_SpectatorState();
+	float a = cv("touch_alpha", 1.0f) * (vid_touchscreen.integer ? 1 : DESK_ALPHA);
+	if (!spec_keys_shown() || !hud_has(TOUCHCTL_SPECBAR) || Cvar_VariableValue(&cvars_all, "_touch_join_waiting", ~0))
+		return;
+	// our CSQC's bar always ends in JOIN
+	join = cl_touch_csqc_active || spec_join_shown();
+	spec_bar_layout_join(r, join);
+	for (part = 0; part < TOUCHSPEC_BAR_PARTS; part++)
+	{
+		float half;
+		int action = TouchSpec_BarAction(state, part);
+		const char *command = action == TOUCHSPEC_ACT_PREV ? "weapprev" : action == TOUCHSPEC_ACT_FREE ? "+fire2"
+			: action == TOUCHSPEC_ACT_JOIN ? "+jump" : "+fire";
+		if (action == TOUCHSPEC_ACT_NONE || (part == TOUCHSPEC_BAR_JOIN && !join))
+			continue;
+		half = max(9.0f * ui_h() / 360.0f, r[part].hy * 0.42f);
+		spec_keybadge(r[part].cx, r[part].cy - r[part].hy - half * 0.75f, half, command, false, a);
+	}
+}
+
 static void draw_spectate_inputs(void)
 {
-	static const char *commands[] = {"+forward", "+back", "+moveleft", "+moveright", "+jump", "+crouch", "+fire", "+fire2"};
-	static const float col[] = {1, 1, 0, 2, 3, 4, 5, 6};
-	static const float row[] = {0, 1, 1, 1, 1, 1, 1, 1};
 	int mask, i;
-	float in_l = 0, in_t = 0, in_r = 0, in_b = 0, density = 0;
-	float u = ui_h() / 360.0f, x, y, px2con;
-	const char *insets = Cvar_VariableString(&cvars_all, "_touch_safe_insets", ~0);
+	float u = ui_h() / 360.0f, lift;
 	qbool keyboard;
 	if (!in_play() || cl.intermission || cursor_wanted() || TouchChatLog_PanelHasInput())
 		return;
+	shapes_probe();
+	draw_spec_barkeys();
 	if (!spec_inputs_mask(&mask))
 		return;
 	if (spec_test_mask >= 0)
 		mask = spec_test_mask;
-	if (insets && insets[0])
-		sscanf(insets, "%f %f %f %f %f", &in_l, &in_t, &in_r, &in_b, &density);
-	px2con = vid.mode.width > 0 ? ui_w() / vid.mode.width : 1.0f;
-	x = (in_l * px2con + ui_w() - in_r * px2con) * 0.5f;
-	y = min(ui_h() * 0.83f, ui_h() - in_b * px2con - 8 * u);
 	keyboard = spec_test_keyboard >= 0 ? spec_test_keyboard != 0 : VID_HasKeyboard();
 	shapes_probe();
 	spec_draw_count++;
@@ -3731,6 +3829,7 @@ static void draw_spectate_inputs(void)
 			a *= DESK_ALPHA;
 			spec_lift = 0.1f; // clear of the stock panels and kill feed
 		}
+		lift = spec_lift;
 		if (!keyboard)
 		{
 			float dx = ((mask & 8) != 0) - ((mask & 4) != 0);
@@ -3742,6 +3841,20 @@ static void draw_spectate_inputs(void)
 			}
 			draw_stick_at(dx, dy, dx || dy, a);
 		}
+		if (keyboard)
+		{
+			// W A S D where the stick would be, inside its ring
+			static const char *const move[4] = { "+forward", "+back", "+moveleft", "+moveright" };
+			static const float kx[4] = { 0, 0, -1, 1 }, ky[4] = { -0.5f, 0.5f, 0.5f, 0.5f };
+			float ring = widget_radius(cv("touch_move_size", 0.400f)), half = ring * 0.29f, pitch = ring * 0.64f;
+			widget_center(cv("touch_move_x", 0.170f), cv("touch_move_y", 0.680f) - spec_lift, &cx, &cy);
+			for (i = 0; i < 4; i++)
+			{
+				char buf[64];
+				const char *name = spec_key_name(move[i], buf, sizeof(buf));
+				spec_keycap(cx + kx[i] * pitch, cy + ky[i] * pitch, half, half, name ? name : "-", (mask & (1 << i)) != 0, a);
+			}
+		}
 		draw_circle_widget("touch_fire_x", 0.855f, "touch_fire_y", 0.680f, "touch_fire_size", 0.160f, "FIRE", (mask & 64) != 0, a, C_DANGER);
 		draw_circle_widget("touch_fire2_x", 0.770f, "touch_fire2_y", 0.755f, "touch_fire2_size", 0.100f, "ALT", (mask & 128) != 0, a, C_DANGER);
 		draw_circle_widget("touch_crouch_x", 0.700f, "touch_crouch_y", 0.885f, "touch_crouch_size", 0.080f, "DUCK", (mask & 32) != 0, a, C_ACCENT);
@@ -3749,55 +3862,22 @@ static void draw_spectate_inputs(void)
 		spec_lift = 0;
 		widget_half(cv("touch_jump_size", 0.072f), cv("touch_jump_aspect", 2.6f), &hx, &hy);
 		widget_capsule(cx, cy, hx, hy, "HOP", (mask & 16) != 0, false, a, C_ACCENT);
-	}
-	if (keyboard)
-	{
-		// the keycaps sit over the spectator bar
-		float bx, by, bhx, bhy;
-		spec_bar_part(TOUCHSPEC_BAR_MAIN, &bx, &by, &bhx, &bhy);
-		if (by > ui_h() * 0.5f)
-			y = min(y, by - bhy - 6 * u);
-		for (i = 0; i < 8; i++)
+		if (keyboard)
 		{
-			int keys[MAX_KEYS], key;
-			char buf[64];
-			const char *name;
-			Key_FindKeysForCommand(commands[i], keys, MAX_KEYS, -1);
-			key = keys[0];
-			if (i >= 6)
+			static const char *const act[3] = { "+fire", "+fire2", "+crouch" };
+			static const int bit[3] = { 64, 128, 32 };
+			float half;
+			half = max(9 * u, hy * 0.62f);
+			spec_keybadge(cx - hx, cy - hy, half, "+jump", (mask & 16) != 0, a);
+			for (i = 0; i < 3; i++)
 			{
-				int j;
-				for (j = 0; j < MAX_KEYS && keys[j] >= 0; j++)
-					if (keys[j] == K_MOUSE1 || keys[j] == K_MOUSE2)
-					{
-						key = keys[j];
-						break;
-					}
-			}
-			if (key == K_MOUSE1)
-				name = "M1";
-			else if (key == K_MOUSE2)
-				name = "M2";
-			else if (key >= 0)
-				name = Key_KeynumToString(key, buf, sizeof(buf));
-			else
-				name = "-";
-			if (name[0] >= 'a' && name[0] <= 'z' && !name[1])
-			{
-				buf[0] = name[0] - 'a' + 'A';
-				buf[1] = 0;
-				name = buf;
-			}
-			{
-				float cx = x + (col[i] - 3) * 23 * u;
-				float cy = y - (1 - row[i]) * 23 * u - 11 * u;
-				float fs = label_size(10 * u, 10 * u, name);
-				float width = label_width(fs, name);
-				if (width > 17 * u)
-					fs *= 17 * u / width;
-				DrawQ_RoundedBox(cx, cy, 10 * u, 10 * u, 3 * u, 0, (mask & (1 << i)) ? C_ACCENT[0] : C_SURFACE[0], (mask & (1 << i)) ? C_ACCENT[1] : C_SURFACE[1], (mask & (1 << i)) ? C_ACCENT[2] : C_SURFACE[2], 0.9f, 0);
-				DrawQ_RoundedBox(cx, cy, 10 * u, 10 * u, 3 * u, max(1.0f, u), (mask & (1 << i)) ? C_ACCENT[0] : C_RIM[0], (mask & (1 << i)) ? C_ACCENT[1] : C_RIM[1], (mask & (1 << i)) ? C_ACCENT[2] : C_RIM[2], 0.9f, 0);
-				shape_label(cx, cy, fs, name, C_INK, 0.9f);
+				float r;
+				widget_center(i == 0 ? cv("touch_fire_x", 0.855f) : i == 1 ? cv("touch_fire2_x", 0.770f) : crouch_x(cv("touch_crouch_x", 0.700f)),
+					(i == 0 ? cv("touch_fire_y", 0.680f) : i == 1 ? cv("touch_fire2_y", 0.755f) : cv("touch_crouch_y", 0.885f)) - lift, &cx, &cy);
+				r = widget_radius(i == 0 ? cv("touch_fire_size", 0.160f) : i == 1 ? cv("touch_fire2_size", 0.100f) : cv("touch_crouch_size", 0.080f));
+				half = max(9 * u, r * 0.36f);
+				// DUCK's sits on top, clear of the bar beside it
+				spec_keybadge(i == 2 ? cx : cx - r * 0.74f, cy - r * (i == 2 ? 0.95f : 0.74f), half, act[i], (mask & bit[i]) != 0, a);
 			}
 		}
 	}
