@@ -124,12 +124,12 @@ static void publish(void)
 void TouchNade_Frame(void)
 {
 	double now = host.realtime;
-	qbool down = tn.hud_down || tn.cmd_down, cooking, alive;
+	qbool down = (cl_touch_nade_row.integer && tn.hud_down) || tn.cmd_down, cooking, alive;
 	float at = bound(0.5f, cl_touch_nade_autothrow_at.value, 0.95f);
 	int state;
 
 	alive = cls.state == ca_connected && cls.signon == SIGNONS && cl.stats[STAT_HEALTH] > 0 && !cl.intermission;
-	if (!cl_touch_nade_row.integer || !TouchHook_NadesActive() || !alive || TouchAim_BlockReason())
+	if (!TouchHook_NadesActive() || !alive || TouchAim_BlockReason())
 	{
 		tn.out = false;
 		tn.safety = false;
@@ -172,7 +172,7 @@ void TouchNade_Frame(void)
 		state = TOUCH_NADE_READY;
 	else
 		state = TOUCH_NADE_WAITING;
-	tn.state = state;
+	tn.state = cl_touch_nade_row.integer ? state : TOUCH_NADE_HIDDEN;
 	publish();
 }
 

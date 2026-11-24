@@ -16,6 +16,7 @@ older engine never calls a builtin that is not there.
 #include <setjmp.h>
 #include "touch_uib_int.h"
 #include "touch_uib_mvm.h"
+#include "touch_joinpreview.h"
 
 #ifdef CONFIG_MENU
 extern jmp_buf mp_abort;
@@ -393,7 +394,7 @@ void VM_uib_parent(prvm_prog_t *prog)
 }
 
 
-// string uib_loadinfo(): "<state> <signon> <progress> <speed> \"<file>\" <downloads>"
+// string uib_loadinfo(): "<state> <signon> <progress> <speed> \"<file>\" <downloads> \"<map>\" \"<picture>\""
 // state: menu, connecting, downloading, loading, game
 void VM_uib_loadinfo(prvm_prog_t *prog)
 {
@@ -434,17 +435,28 @@ void VM_uib_loadinfo(prvm_prog_t *prog)
 	else if (nd)
 		state = "downloading";
 #endif
-	char out[MAX_QPATH + 128];
+	char map[MAX_QPATH] = "", picture[MAX_QPATH] = "";
+	TouchJoinPreview_MapName(map, sizeof(map));
+	// This can be a levelshots image or a preview extracted from a server's
+	// package, not necessarily maps/<name>.jpg.
+	TouchJoinPreview_Picture(picture, sizeof(picture));
+	char out[MAX_QPATH * 3 + 128];
 	for (char *q = file; *q; q++)
 		if (*q == '"' || *q == '\\')
 			*q = '_';
-	dpsnprintf(out, sizeof(out), "%s %d %.3f %.0f \"%s\" %d", state,
+	for (char *q = map; *q; q++)
+		if (*q == '"' || *q == '\\')
+			*q = '_';
+	for (char *q = picture; *q; q++)
+		if (*q == '"' || *q == '\\')
+			*q = '_';
+	dpsnprintf(out, sizeof(out), "%s %d %.3f %.0f \"%s\" %d \"%s\" \"%s\"", state,
 #ifdef CONFIG_MENU
 		cls.signon,
 #else
 		0,
 #endif
-		progress, speed, file, nd);
+		progress, speed, file, nd, map, picture);
 	PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, out, strlen(out));
 }
 

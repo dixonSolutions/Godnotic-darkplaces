@@ -58,6 +58,7 @@ static double tcl_cleared_at = -1; /* cl.time of the last clear: stock lines old
 
 /* the log panel */
 static int tcl_panel;            /* open */
+static int tcl_return_chat;      /* return to the composer after its log closes */
 static int tcl_filter;           /* 0 all, 1 chat, 2 events */
 static tcl_scroller_t tcl_sc;    /* the panel's scroll, in console units from the newest end */
 static double tcl_last_frame;
@@ -478,7 +479,12 @@ static void TCL_Open(int open)
 		return;
 	tcl_panel = open;
 	if (!open)
+	{
 		TCL_ClearSelection();
+		if (tcl_return_chat && cls.state == ca_connected)
+			Cbuf_AddText(cmd_local, "\ntouch_chat\n");
+		tcl_return_chat = 0;
+	}
 	tcl_anchor_valid = 0;
 	if (open)
 		tcl_filter = 0;
@@ -497,6 +503,7 @@ static void TCL_Mention(const char *name)
 {
 	if (!name[0])
 		return;
+	tcl_return_chat = 0; /* mention opens its own input */
 	TCL_Open(0);
 	key_dest = key_message;
 	chat_mode = 0;
@@ -1347,6 +1354,7 @@ void TouchChatLog_Draw(float x, float y, float w, float size, int stock_lines)
 			Cvar_SetQuick(&touch_chatlog_claim, "");
 		tcl_ntg = 0;
 		tcl_panel = 0;
+		tcl_return_chat = 0;
 		return;
 	}
 	dt = bound(0.0f, (float)(host.realtime - tcl_last_frame), 0.1f);
@@ -1379,7 +1387,7 @@ void TouchChatLog_Draw(float x, float y, float w, float size, int stock_lines)
 /* ------------------------------------------------------------------ */
 /* commands (and what tests read)                                       */
 /* ------------------------------------------------------------------ */
-static void TCL_Open_f(cmd_state_t *cmd) { (void)cmd; TCL_Open(1); }
+static void TCL_Open_f(cmd_state_t *cmd) { TCL_Open(1); tcl_return_chat = Cmd_Argc(cmd) > 1 && !strcmp(Cmd_Argv(cmd, 1), "chat"); }
 static void TCL_Close_f(cmd_state_t *cmd) { (void)cmd; TCL_Open(0); }
 static void TCL_Toggle_f(cmd_state_t *cmd) { (void)cmd; TCL_Open(!tcl_panel); }
 

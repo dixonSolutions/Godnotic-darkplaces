@@ -222,7 +222,7 @@ static void TouchData_Want(const char *map)
 	dpsnprintf(from, sizeof(from), "%s" TOUCH_DATA_REQUEST ".tmp", fs_gamedir);
 	dpsnprintf(to, sizeof(to), "%s" TOUCH_DATA_REQUEST, fs_gamedir);
 	if (rename(from, to))
-		Con_DPrintf("touch_data_want: could not write %s\n", to);
+		Con_DPrintf("touch_data_request: could not write %s\n", to);
 #endif
 }
 
@@ -231,7 +231,7 @@ static void TouchData_Want_f(cmd_state_t *cmd)
 	const char *map;
 	if (Cmd_Argc(cmd) != 2)
 	{
-		Con_Printf("usage: touch_data_want <map>  (ask the data downloader to fetch this map's packs first)\n");
+		Con_Printf("usage: touch_data_request <map>  (ask the data downloader to fetch this map's packs first)\n");
 		return;
 	}
 	map = Cmd_Argv(cmd, 1);
@@ -389,6 +389,8 @@ void TouchData_Init(void)
 	Cvar_RegisterVariable(&touch_data_pending);
 	Cvar_RegisterVariable(&touch_data_pending_map);
 	Cmd_AddCommand(CF_CLIENT, "touch_data_status", TouchData_Status_f, "the data downloader's state as \"key value\" pairs: state, set, done_kb, total_kb, want, want_done_kb, want_total_kb, message, landed (Godnotic, docs/DATA_FETCH.md); without arguments prints it");
-	Cmd_AddCommand(CF_CLIENT, "touch_data_want", TouchData_Want_f, "ask the data downloader to fetch a map's packs before the rest");
+	// `touch_data_want` is a read-only status cvar, so the request command
+	// must use a distinct name (Cmd_AddCommand rejects cvar-name collisions).
+	Cmd_AddCommand(CF_CLIENT, "touch_data_request", TouchData_Want_f, "ask the data downloader to fetch a map's packs before the rest");
 	Cmd_AddCommand(CF_CLIENT, "touch_data_cancel", TouchData_Cancel_f, "drop the command that waits for a map to download");
 }

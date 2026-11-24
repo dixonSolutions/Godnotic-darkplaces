@@ -1060,6 +1060,9 @@ void TouchNet_Disconnecting(qbool kicked, const char *reason)
 	if (!LHNETADDRESS_ToString(&cls.netcon->peeraddress, addr, sizeof(addr), true))
 		return;
 	tn_rc.spectated = false;
+	// A deliberate leave ends this session; a later join is not a map change.
+	if (!kicked)
+		tn_rc.joined_at = tn_rc.out_at = 0;
 	if (kicked && reason)
 	{
 		// what the owner's next report needs: why, after how long, and what the link looked like
@@ -1090,7 +1093,10 @@ void TouchNet_Disconnecting(qbool kicked, const char *reason)
 	// the server's side. Join again once; a second drop within 2 minutes is not
 	// joined again (a kick or a ban would only repeat).
 	if (kicked && reason && !strcmp(reason, "Server disconnected") && net_reconnect.integer && net_reconnect_server.integer && !tn_rc.user
-	 && tn_rc.in_game && tn_rc.joined_at > 0 && host.realtime - tn_rc.joined_at >= net_reconnect_server_min.value
+	 && tn_rc.joined_at > 0 && !strcmp(tn_rc.addr, addr)
+	 && ((tn_rc.in_game && host.realtime - tn_rc.joined_at >= net_reconnect_server_min.value)
+	  || (!tn_rc.in_game && tn_rc.out_at >= tn_rc.joined_at && tn_rc.out_at - tn_rc.joined_at >= net_reconnect_server_min.value
+	      && host.realtime - tn_rc.out_at <= 120))
 	 && (tn_rc.sd_last == 0 || host.realtime - tn_rc.sd_last > 120) && !tn_rc.away)
 	{
 		tn_rc.sd_last = host.realtime;
@@ -1132,6 +1138,8 @@ void TouchNet_Disconnecting(qbool kicked, const char *reason)
 			cls.netcon ? host.realtime - cls.netcon->lastMessageTime : -1.0);
 		TN_SetState(line);
 	}
+	// A disconnect we did not recover ends this session as well.
+	tn_rc.joined_at = tn_rc.out_at = 0;
 }
 
 // connect (or a join from the menu) to the server this client is connected
@@ -1156,7 +1164,10 @@ void TouchNet_ConnectAgain(const char *address)
 static void TouchNet_ReconnectCancel_f(cmd_state_t *cmd)
 {
 	if (tn_rc.next)
+	{
 		Con_Printf("Not joining %s again.\n", tn_rc.addr);
+		tn_rc.joined_at = tn_rc.out_at = 0;
+	}
 	tn_rc.next = 0;
 	tn_rc.tries = 0;
 	TN_SetState("");

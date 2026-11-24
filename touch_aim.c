@@ -52,9 +52,11 @@ cvar_t cl_touch_autoshoot = {CF_CLIENT | CF_ARCHIVE, "cl_touch_autoshoot", "1",
 	"Touch controls: fire automatically while the crosshair is on a visible enemy player. "
 	"With a mouse present it also requires cl_accessibility_desktop. A manual FIRE press always works on top of it"};
 cvar_t cl_accessibility_desktop = {CF_CLIENT | CF_ARCHIVE, "cl_accessibility_desktop", "0",
-	"Keep the mobile auto-shoot and aim-assist settings on while a mouse is present (they are always on with touch or a keyboard only)"};
+	"Keep the mobile auto-shoot, aim-assist and automatic weapon switching settings on while a mouse is present (they are always on with touch or a keyboard only)"};
 cvar_t cl_touch_aim_input = {CF_CLIENT | CF_READONLY, "cl_touch_aim_input", "0",
 	"1 while the input devices present allow auto-shoot and aim assist: touch or a keyboard only, or cl_accessibility_desktop with a mouse (read-only)"};
+static cvar_t cl_touch_autoswitch_input = {CF_CLIENT | CF_READONLY, "_cl_touch_autoswitch_input", "0",
+	"1 while automatic weapon switching is enabled by the input, player and server settings (Godnotic)"};
 cvar_t cl_touch_autoshoot_delay = {CF_CLIENT | CF_ARCHIVE, "cl_touch_autoshoot_delay", "0",
 	"Auto-shoot reaction time: seconds the crosshair must stay on an enemy before firing starts (0 = on the first frame, at most 0.5)"};
 cvar_t cl_touch_autoshoot_release = {CF_CLIENT | CF_ARCHIVE, "cl_touch_autoshoot_release", "0.15",
@@ -422,6 +424,7 @@ void TouchAim_Init(void)
 	Cvar_RegisterVariable(&cl_touch_autoshoot_steer);
 	Cvar_RegisterVariable(&cl_touch_autoshoot_safe);
 	Cvar_RegisterVariable(&cl_touch_autoswitch);
+	Cvar_RegisterVariable(&cl_touch_autoswitch_input);
 	Cvar_RegisterVariable(&cl_touch_autoshoot_air);
 	Cvar_RegisterVariable(&cl_touch_autoshoot_predict);
 	Cvar_RegisterVariable(&cl_touch_autoshoot_feet);
@@ -613,9 +616,13 @@ static qbool aim_input_enabled(void)
 	return TouchAim_EnabledForInput(vid_mouse_confirmed_cvar.integer != 0, cl_accessibility_desktop.integer != 0);
 }
 
+static qbool autoswitch_on(void);
+
 static void publish(void)
 {
 	int active = (ta.firing ? 1 : 0) | (ta.firing2 ? 2 : 0);
+	if (cl_touch_autoswitch_input.integer != (autoswitch_on() ? 1 : 0))
+		Cvar_SetValueQuick(&cl_touch_autoswitch_input, autoswitch_on() ? 1 : 0);
 	if (cl_touch_aim_input.integer != (aim_input_enabled() ? 1 : 0))
 		Cvar_SetValueQuick(&cl_touch_aim_input, aim_input_enabled() ? 1 : 0);
 	if (cl_touch_autoshoot_active.integer != active)
@@ -756,7 +763,8 @@ static int cand_field_int(prvm_edict_t *ed, int ofs, int type)
 // (touch_assist.c).
 static qbool autoswitch_on(void)
 {
-	return cl_touch_autoswitch.integer != 0 && TouchAssist_Allowed(TOUCH_ASSIST_AUTOSWITCH);
+	return TouchAim_AutoSwitchEnabled(vid_mouse_confirmed_cvar.integer != 0, cl_accessibility_desktop.integer != 0,
+		cl_touch_autoswitch.integer != 0, TouchAssist_Allowed(TOUCH_ASSIST_AUTOSWITCH));
 }
 
 // Clear line through world geometry (and CSQC brush models such as doors).
