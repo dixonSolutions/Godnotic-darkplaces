@@ -677,6 +677,9 @@ static void TouchHUD_TestFinger_f(cmd_state_t *cmd)
 		Con_Print("usage: _touch_test_finger <slot> <0|1 down> [x y]  (x, y 0..1)\n");
 		return;
 	}
+	// the overlays see a finger first, as from vid_sdl.c
+	if (TouchHUD_OverlayFinger(atoi(Cmd_Argv(cmd, 2)) ? 0 : 2, slot + 1, Cmd_Argc(cmd) > 4 ? atof(Cmd_Argv(cmd, 3)) : 0, Cmd_Argc(cmd) > 4 ? atof(Cmd_Argv(cmd, 4)) : 0))
+		return;
 	multitouch[slot][0] = atoi(Cmd_Argv(cmd, 2)) ? slot + 1 : 0;
 	if (Cmd_Argc(cmd) > 4)
 	{
@@ -700,6 +703,9 @@ static void TouchHUD_TestView_f(cmd_state_t *cmd)
 }
 
 static cvar_t touch_spectate_inputs = {CF_CLIENT | CF_ARCHIVE, "touch_spectate_inputs", "1", "show the followed player's inputs"};
+static cvar_t touch_spectate_view = {CF_CLIENT | CF_ARCHIVE, "touch_spectate_view", "0", "view of the followed player: 0 first person, 1 third person, 2 front, 3 top down"};
+static cvar_t touch_spectate_view_saved = {CF_CLIENT | CF_ARCHIVE, "touch_spectate_view_saved", "", "internal: the chase camera settings to put back after spectating"};
+static void TouchHUD_SpectateView_f(cmd_state_t *cmd);
 static int spec_test_mask = -1, spec_test_keyboard = -1;
 static unsigned int spec_draw_count;
 static qbool spec_inputs_mask(int *mask)
@@ -735,7 +741,12 @@ void TouchHUD_SpecInputsBegin(void)
 	int mask;
 	spec_panel = NULL;
 	if (!spec_inputs_mask(&mask))
-		return;
+	{
+		// never the stock arrows box beside touch controls
+		int state = TouchUI_SpectatorState();
+		if ((state != 2 && state != 3) || vid_keyboard_detected.integer || !(vid_touchscreen.integer || vid_touchscreen_detected.integer))
+			return;
+	}
 	spec_panel = Cvar_FindVar(&cvars_all, "hud_panel_pressedkeys", ~0);
 	if (spec_panel)
 	{
@@ -756,6 +767,9 @@ void TouchHUD_Init(void)
 {
 	TouchHudMode_Init();
 	Cvar_RegisterVariable(&touch_spectate_inputs);
+	Cvar_RegisterVariable(&touch_spectate_view);
+	Cvar_RegisterVariable(&touch_spectate_view_saved);
+	Cmd_AddCommand(CF_CLIENT, "touch_spectate_view_step", TouchHUD_SpectateView_f, "view of the followed player: next or prev (no argument prints it)");
 	Cmd_AddCommand(CF_CLIENT, "_touch_test_spectate_inputs", TouchHUD_TestInputs_f, "test hook: mask and keyboard override, -1 disables");
 	Cvar_RegisterVariable(&touch_viewmodel_restored);
 	Cvar_RegisterVariable(&cl_touch_weplist_scale);
@@ -2951,7 +2965,7 @@ static void draw_vitals(float a)
 // ---------------------------------------------------------------------------
 // Draw (touch_draw.qc)
 // ---------------------------------------------------------------------------
-static void draw_move_stick(float a)
+static void draw_stick_at(float ox, float oy, qbool held, float a)
 {
 	float cx, cy, r, knob_r, knob_x, knob_y, mag;
 	const float *knob_rgb = C_RIM;
@@ -2961,17 +2975,17 @@ static void draw_move_stick(float a)
 	r = stick_radius();
 	if (r < 4)
 		return;
-	if (stick_held)
+	if (held && stick_held)
 	{
 		// Keep the visual ring fixed; only the knob follows the finger.
 		cx = stick.cx;
 		cy = stick.cy;
 	}
-	mag = sqrt(move_off_x * move_off_x + move_off_y * move_off_y);
-	active = stick_held && mag > cv("touch_stick_deadzone", 0.14f);
+	mag = sqrt(ox * ox + oy * oy);
+	active = held && mag > cv("touch_stick_deadzone", 0.14f);
 	knob_r = r * 0.34f;
-	knob_x = cx + move_off_x * (r - knob_r);
-	knob_y = cy + move_off_y * (r - knob_r);
+	knob_x = cx + ox * (r - knob_r);
+	knob_y = cy + oy * (r - knob_r);
 	shape_shadow(cx, cy + elevation(r), r * 1.06f, a * A_SHADOW * 0.6f * glass_body(false));
 	shape_disc(cx, cy, r, C_SURFACE, a * A_SURFACE * 0.75f * glass_body(false));
 	widget_rim(cx, cy, r, C_RIM, a * A_RIM * 0.85f);
@@ -2987,11 +3001,19 @@ static void draw_move_stick(float a)
 	widget_rim(knob_x, knob_y, knob_r, C_RIM, a * A_RIM_ACTIVE);
 }
 
+static void draw_move_stick(float a)
+{
+	draw_stick_at(move_off_x, move_off_y, stick_held, a);
+}
+
+static float spec_lift; // screen share the watched player's buttons go up by
+
 static void draw_circle_widget(const char *xk, float dx, const char *yk, float dy, const char *sk, float ds, const char *label, qbool pressed, float a, const float *accent)
 {
 	float cx, cy;
 	float nx = cv(xk, dx);
 	widget_center(!strcmp(xk, "touch_crouch_x") ? crouch_x(nx) : nx, cv(yk, dy), &cx, &cy);
+	cy -= spec_lift * ui_h();
 	widget_button(cx, cy, widget_radius(cv(sk, ds)), label, pressed, a, accent);
 }
 
@@ -3134,9 +3156,25 @@ static void spec_release(void)
 static void spec_bar_layout(touchspec_bar_rect_t r[TOUCHSPEC_BAR_PARTS])
 {
 	float u = dp_units(), bx, by, base;
-	widget_center(cv("touch_specbar_x", 0.815f), cv("touch_specbar_y", 0.885f), &bx, &by);
+	widget_center(cv("touch_specbar_x", 0.460f), cv("touch_specbar_y", 0.930f), &bx, &by);
+	// without the touch HUD the stock health and ammo panels fill the bottom
+	if (!vid_touchscreen.integer)
+		by = min(by, ui_h() * 0.775f);
 	base = max(TOUCHDP_SECONDARY * 0.5f * u, screen_min() * cv("touch_specbar_size", 0.085f) * 0.5f * widget_scale());
-	TouchSpec_BarLayout(ui_w(), ui_h(), bx, by, base, u, spec_join_shown(), r);
+	{
+		// the row ends where the lit DUCK button starts (QC Touch_Spec_BarFit)
+		float lo = 0, hi = ui_w(), dx, dy, dr = widget_radius(cv("touch_crouch_size", 0.080f));
+		int part;
+		widget_center(crouch_x(cv("touch_crouch_x", 0.700f)), cv("touch_crouch_y", 0.885f), &dx, &dy);
+		if (vid_touchscreen.integer && by + base > dy - dr && by - base < dy + dr)
+		{
+			if (dx > ui_w() * 0.5f) hi = dx - dr;
+			else lo = dx + dr;
+		}
+		TouchSpec_BarLayout(hi - lo, ui_h(), bx - lo, by, base, u, spec_join_shown(), r);
+		for (part = 0; part < TOUCHSPEC_BAR_PARTS; part++)
+			r[part].cx += lo;
+	}
 }
 
 // The bar part under a point: the one test the drawn bar and the desk strip
@@ -3273,11 +3311,28 @@ static void draw_spec_bar(int state, float a)
 	for (part = 0; part < TOUCHSPEC_BAR_PARTS; part++)
 	{
 		int action = TouchSpec_BarAction(state, part);
-		const char *label = TouchSpec_BarLabel(state, part);
+		const char *label = part == TOUCHSPEC_BAR_MAIN ? TouchSpec_MainLabel(state, target) : TouchSpec_BarLabel(state, part);
+		char fitted[128];
 		qbool held = false;
 		if (!label[0])
 			continue;
 		spec_bar_part(part, &cx, &cy, &hx, &hy);
+		if (part == TOUCHSPEC_BAR_MAIN)
+		{
+			// a long name is cut to the pill, not run over the arrows
+			size_t n;
+			dp_strlcpy(fitted, label, sizeof(fitted));
+			n = strlen(fitted);
+			while (n > 3 && label_width(label_size(hx, hy, fitted), fitted) > hx * 2 * 0.92f)
+			{
+				do n--; while (n > 1 && (fitted[n] & 0xC0) == 0x80);
+				dp_strlcpy(fitted + n, "..", sizeof(fitted) - n);
+				if (label_width(label_size(hx, hy, fitted), fitted) <= hx * 2 * 0.92f)
+					break;
+				fitted[n] = 0;
+			}
+			label = fitted;
+		}
 		if (action == TOUCHSPEC_ACT_PREV)
 			held = role_owned(ROLE_SPEC_PREV);
 		else if (action == TOUCHSPEC_ACT_FREE)
@@ -3287,21 +3342,6 @@ static void draw_spec_bar(int state, float a)
 		else if (action != TOUCHSPEC_ACT_NONE)
 			held = role_owned(ROLE_SPEC_ATTACK) && key_attack;
 		widget_capsule(cx, cy, hx, hy, label, held || (part == TOUCHSPEC_BAR_MAIN && TouchSpec_Flying(state)), false, action == TOUCHSPEC_ACT_NONE ? a * 0.6f : a, C_ACCENT);
-	}
-	// who is being watched, over the bar
-	if (target[0])
-	{
-		char line[96];
-		float fs;
-		spec_bar_part(TOUCHSPEC_BAR_MAIN, &cx, &cy, &hx, &hy);
-		dpsnprintf(line, sizeof(line), "%s", target);
-		fs = bound(FONT_MIN, hy * 0.62f, FONT_MAX);
-		{
-			float w = DrawQ_TextWidth(line, 0, fs, fs, false, FONT_CHAT);
-			float x = bound(4.0f, cx - w * 0.5f, ui_w() - w - 4);
-			DrawQ_RoundedBox(x + w * 0.5f, cy - hy * 1.75f, w * 0.5f + fs * 0.6f, fs * 0.75f, fs * 0.75f, 0, C_SURFACE[0], C_SURFACE[1], C_SURFACE[2], a * A_CHROME_FILL * 0.8f, 0);
-			DrawQ_String(x, cy - hy * 1.75f - fs * 0.5f, line, 0, fs, fs, 1, 1, 1, a * A_INK, 0, NULL, false, FONT_CHAT);
-		}
 	}
 }
 
@@ -3498,6 +3538,8 @@ static qbool endmenu_finger(int type, int id, float nx, float ny)
 	return true;
 }
 
+static qbool viewstrip_finger(int type, int id, float nx, float ny);
+
 // Real mouse clicks share the finger hit paths, in the same window-to-console
 // coordinates as the pointer. Synthetic mouse events belong to the finger path.
 qbool TouchHUD_OverlayMouse(qbool down, int button, qbool synthetic, float wx, float wy, qbool pointer_free)
@@ -3522,7 +3564,7 @@ qbool TouchHUD_OverlayMouse(qbool down, int button, qbool synthetic, float wx, f
 				return true;
 			}
 		}
-		if (endmenu_finger(0, -1, nx, ny))
+		if (endmenu_finger(0, -1, nx, ny) || viewstrip_finger(0, -1, nx, ny))
 		{
 			menu_held = true;
 			return true;
@@ -3537,7 +3579,8 @@ qbool TouchHUD_OverlayMouse(qbool down, int button, qbool synthetic, float wx, f
 	else if (menu_held)
 	{
 		menu_held = false;
-		endmenu_finger(2, -1, nx, ny);
+		if (!endmenu_finger(2, -1, nx, ny))
+			viewstrip_finger(2, -1, nx, ny);
 		return true;
 	}
 	return false;
@@ -3546,7 +3589,7 @@ qbool TouchHUD_OverlayMouse(qbool down, int button, qbool synthetic, float wx, f
 // Every finger, from TouchVote_Finger before the finger table.
 qbool TouchHUD_OverlayFinger(int type, int id, float nx, float ny)
 {
-	return endmenu_finger(type, id, nx, ny);
+	return endmenu_finger(type, id, nx, ny) || viewstrip_finger(type, id, nx, ny);
 }
 
 // ---------------------------------------------------------------------------
@@ -3659,8 +3702,6 @@ static void draw_chrome(float a)
 static void draw_spectate_inputs(void)
 {
 	static const char *commands[] = {"+forward", "+back", "+moveleft", "+moveright", "+jump", "+crouch", "+fire", "+fire2"};
-	static const char *labels[] = {"FIRE", "ALT", "JUMP", "CROUCH"};
-	static const int bits[] = {64, 128, 16, 32};
 	static const float col[] = {1, 1, 0, 2, 3, 4, 5, 6};
 	static const float row[] = {0, 1, 1, 1, 1, 1, 1, 1};
 	int mask, i;
@@ -3682,8 +3723,40 @@ static void draw_spectate_inputs(void)
 	keyboard = spec_test_keyboard >= 0 ? spec_test_keyboard != 0 : VID_HasKeyboard();
 	shapes_probe();
 	spec_draw_count++;
+	// the player's own controls, where they are in play, lit by what is held
+	{
+		float a = bound(0.3f, cv("touch_opacity", 0.90f), 1.0f), cx, cy, hx, hy;
+		if (!vid_touchscreen.integer)
+		{
+			a *= DESK_ALPHA;
+			spec_lift = 0.1f; // clear of the stock panels and kill feed
+		}
+		if (!keyboard)
+		{
+			float dx = ((mask & 8) != 0) - ((mask & 4) != 0);
+			float dy = ((mask & 2) != 0) - ((mask & 1) != 0);
+			if (dx && dy)
+			{
+				dx *= 0.7071f;
+				dy *= 0.7071f;
+			}
+			draw_stick_at(dx, dy, dx || dy, a);
+		}
+		draw_circle_widget("touch_fire_x", 0.855f, "touch_fire_y", 0.680f, "touch_fire_size", 0.160f, "FIRE", (mask & 64) != 0, a, C_DANGER);
+		draw_circle_widget("touch_fire2_x", 0.770f, "touch_fire2_y", 0.755f, "touch_fire2_size", 0.100f, "ALT", (mask & 128) != 0, a, C_DANGER);
+		draw_circle_widget("touch_crouch_x", 0.700f, "touch_crouch_y", 0.885f, "touch_crouch_size", 0.080f, "DUCK", (mask & 32) != 0, a, C_ACCENT);
+		widget_center(cv("touch_jump_x", 0.855f), cv("touch_jump_y", 0.885f) - spec_lift, &cx, &cy);
+		spec_lift = 0;
+		widget_half(cv("touch_jump_size", 0.072f), cv("touch_jump_aspect", 2.6f), &hx, &hy);
+		widget_capsule(cx, cy, hx, hy, "HOP", (mask & 16) != 0, false, a, C_ACCENT);
+	}
 	if (keyboard)
 	{
+		// the keycaps sit over the spectator bar
+		float bx, by, bhx, bhy;
+		spec_bar_part(TOUCHSPEC_BAR_MAIN, &bx, &by, &bhx, &bhy);
+		if (by > ui_h() * 0.5f)
+			y = min(y, by - bhy - 6 * u);
 		for (i = 0; i < 8; i++)
 		{
 			int keys[MAX_KEYS], key;
@@ -3728,21 +3801,180 @@ static void draw_spectate_inputs(void)
 			}
 		}
 	}
-	else
+}
+
+// ---------------------------------------------------------------------------
+// The view of the followed player: a small strip at the top, < view >.
+// The choice is remembered (touch_spectate_view) and applied only while
+// following; chase_active and friends go back when that ends. They are
+// archived, so what they were is kept in an archived cvar meanwhile: a game
+// killed while spectating puts them back on the next start.
+// ---------------------------------------------------------------------------
+static const char *const view_names[] = { "First person", "Third person", "Front", "Top down" };
+#define VIEW_COUNT 4
+static struct { int id, part; qbool drawn; float cx, cy, hx, hy; } viewstrip;
+static qbool view_applied;
+
+static qbool view_following(void)
+{
+	int state = TouchUI_SpectatorState();
+	return in_play() && !cl.intermission && (state == TOUCHSPEC_FOLLOWING || state == TOUCHSPEC_OUT);
+}
+
+static void view_set(const char *name, int value)
+{
+	cvar_t *var = Cvar_FindVar(&cvars_all, name, ~0);
+	if (var && var->integer != value)
+		Cvar_SetValueQuick(var, value);
+}
+
+static void view_restore(void)
+{
+	int active = 0, front = 0, overhead = 0;
+	if (touch_spectate_view_saved.string[0])
 	{
-		float cx = x - 35 * u, cy = y - 26 * u, r = 23 * u;
-		float dx = ((mask & 8) != 0) - ((mask & 4) != 0);
-		float dy = ((mask & 2) != 0) - ((mask & 1) != 0);
-		if (dx && dy)
-		{
-			dx *= 0.7071f;
-			dy *= 0.7071f;
-		}
-		widget_button(cx, cy, r, "", false, 0.9f, C_ACCENT);
-		widget_button(cx + dx * 11 * u, cy + dy * 11 * u, 9 * u, "", dx || dy, 0.9f, C_ACCENT);
-		for (i = 0; i < 4; i++)
-			widget_button(x + 6 * u + (i % 2) * 32 * u, y - 40 * u + (i / 2) * 29 * u, 13 * u, labels[i], (mask & bits[i]) != 0, 0.9f, C_ACCENT);
+		sscanf(touch_spectate_view_saved.string, "%d %d %d", &active, &front, &overhead);
+		view_set("chase_active", max(0, active));
+		view_set("chase_front", front);
+		view_set("chase_overhead", overhead);
+		Cvar_SetQuick(&touch_spectate_view_saved, "");
 	}
+	view_applied = false;
+}
+
+static void view_update(void)
+{
+	int view = (int)bound(0, touch_spectate_view.integer, VIEW_COUNT - 1);
+	// "First person" is the game's own view, left alone
+	if (!view_following() || !view)
+	{
+		if (view_applied || touch_spectate_view_saved.string[0])
+			view_restore();
+		return;
+	}
+	if (!view_applied)
+	{
+		char was[48];
+		if (touch_spectate_view_saved.string[0])
+			view_restore();
+		dpsnprintf(was, sizeof(was), "%d %d %d", (int)cv("chase_active", 0), (int)cv("chase_front", 0), (int)cv("chase_overhead", 0));
+		Cvar_SetQuick(&touch_spectate_view_saved, was);
+		view_applied = true;
+	}
+	view_set("chase_active", 1);
+	view_set("chase_front", view == 2);
+	view_set("chase_overhead", view == 3);
+}
+
+static void view_step(int by)
+{
+	Cvar_SetValueQuick(&touch_spectate_view, (((int)bound(0, touch_spectate_view.integer, VIEW_COUNT - 1) + by) % VIEW_COUNT + VIEW_COUNT) % VIEW_COUNT);
+}
+
+static void TouchHUD_SpectateView_f(cmd_state_t *cmd)
+{
+	const char *arg = Cmd_Argc(cmd) > 1 ? Cmd_Argv(cmd, 1) : "";
+	if (!strcmp(arg, "next"))
+		view_step(1);
+	else if (!strcmp(arg, "prev"))
+		view_step(-1);
+	Con_Printf("SPECTATE_VIEW %d \"%s\" following=%d applied=%d chase=%d front=%d top=%d strip=%d %.1f %.1f %.1f %.1f\n", touch_spectate_view.integer,
+		view_names[(int)bound(0, touch_spectate_view.integer, VIEW_COUNT - 1)], view_following(), view_applied,
+		(int)cv("chase_active", 0), (int)cv("chase_front", 0), (int)cv("chase_overhead", 0), viewstrip.drawn, viewstrip.cx, viewstrip.cy, viewstrip.hx, viewstrip.hy);
+}
+
+static qbool viewstrip_shown(void)
+{
+	return view_following() && !cursor_wanted() && !TouchChatLog_PanelHasInput() && !cv("_touch_owns_screen", 0)
+		&& (vid_touchscreen.integer || vid_touchscreen_detected.integer || cv("touch_desk_specbar", 1) != 0);
+}
+
+static void viewstrip_place(void)
+{
+	float u = dp_units(), hud_u = ui_scale() * max(0.4f, cv("touch_hud_scale", 0.85f));
+	float lo = 8 * u, hi = ui_w() - 8 * u, vx, vy, vw;
+	viewstrip.hy = max(18 * u, ui_h() * 0.036f);
+	viewstrip.hx = viewstrip.hy * 4.4f;
+	viewstrip.cy = max(ui_h() * 0.042f + viewstrip.hy, topbar_valid ? topbar.menu.y + topbar.menu.h * 0.5f : 0); // below the timer
+	// between the vitals and the MENU / SCORE / CHAT row
+	widget_center(cv("touch_hud_x", 0.150f), cv("touch_hud_y", 0.115f), &vx, &vy);
+	vw = (22 + 6 + 54 + 12 + 122) * hud_u * 0.5f;
+	if (readouts_shown() || vid_touchscreen.integer)
+	{
+		if (vx < ui_w() * 0.5f) lo = max(lo, vx + vw + 8 * u);
+		else hi = min(hi, vx - vw - 8 * u);
+	}
+	if (topbar_valid)
+	{
+		float l = min(topbar.menu.x, min(topbar.score.x, topbar.chat.x));
+		float r = max(topbar.menu.x + topbar.menu.w, max(topbar.score.x + topbar.score.w, topbar.chat.x + topbar.chat.w));
+		if (l > ui_w() * 0.5f) hi = min(hi, l - 8 * u);
+		else if (r < ui_w() * 0.5f) lo = max(lo, r + 8 * u);
+	}
+	if (hi - lo < viewstrip.hx * 2)
+	{
+		// no room beside them: under the row, in the middle
+		lo = 8 * u; hi = ui_w() - 8 * u;
+		viewstrip.cy = max(viewstrip.cy + viewstrip.hy * 2.6f, vy + (30 * 3 + 6 * 2) * hud_u * 0.5f + viewstrip.hy + 6 * u);
+		if (hi - lo < viewstrip.hx * 2)
+		{
+			viewstrip.hx = (hi - lo) * 0.5f;
+			viewstrip.hy = viewstrip.hx / 4.4f;
+		}
+	}
+	viewstrip.cx = bound(lo + viewstrip.hx, ui_w() * 0.5f, hi - viewstrip.hx);
+}
+
+static void draw_viewstrip(void)
+{
+	float a = bound(0.3f, cv("touch_opacity", 0.90f), 1.0f);
+	viewstrip.drawn = false;
+	if (!viewstrip_shown())
+	{
+		viewstrip.id = 0;
+		return;
+	}
+	shapes_probe();
+	viewstrip_place();
+	viewstrip.drawn = true;
+	{
+		float hy = viewstrip.hy, cx = viewstrip.cx, cy = viewstrip.cy;
+		float mid = viewstrip.hx - hy * 2.1f;
+		widget_capsule(cx - viewstrip.hx + hy, cy, hy, hy, "<", viewstrip.id && viewstrip.part < 0, false, a, C_ACCENT);
+		widget_capsule(cx + viewstrip.hx - hy, cy, hy, hy, ">", viewstrip.id && viewstrip.part > 0, false, a, C_ACCENT);
+		widget_capsule(cx, cy, mid, hy * 0.82f, view_names[(int)bound(0, touch_spectate_view.integer, VIEW_COUNT - 1)], false, false, a * 0.9f, C_ACCENT);
+	}
+}
+
+static int viewstrip_part(float px, float py)
+{
+	float dx = px - viewstrip.cx;
+	if (fabs(py - viewstrip.cy) > viewstrip.hy * 1.3f || fabs(dx) > viewstrip.hx + viewstrip.hy * 0.3f)
+		return 0;
+	return dx < 0 ? -1 : 1; // the halves step: a thumb need not hit the arrow itself
+}
+
+static qbool viewstrip_finger(int type, int id, float nx, float ny)
+{
+	float px = nx * ui_w(), py = ny * ui_h();
+	if (type == 0)
+	{
+		int part;
+		if (viewstrip.id || !viewstrip.drawn || !viewstrip_shown() || !(part = viewstrip_part(px, py)))
+			return false;
+		viewstrip.id = id;
+		viewstrip.part = part;
+		return true;
+	}
+	if (id != viewstrip.id || !id)
+		return false;
+	if (type == 2)
+	{
+		viewstrip.id = 0;
+		if (viewstrip_shown() && viewstrip_part(px, py) == viewstrip.part)
+			view_step(viewstrip.part);
+	}
+	return true;
 }
 
 void TouchHUD_Draw(void)
@@ -3751,7 +3983,23 @@ void TouchHUD_Draw(void)
 	float cx, cy, hx, hy;
 	frames_drawn++;
 	TouchHudMode_Update();
+	{
+		// The bar moved from under HOP and DUCK; an install that still holds
+		// the old place follows, a hand-placed bar stays.
+		static qbool moved;
+		if (!moved && cls.state == ca_connected)
+		{
+			moved = true;
+			if (fabs(cv("touch_specbar_x", 0) - 0.815f) < 0.0005f && fabs(cv("touch_specbar_y", 0) - 0.885f) < 0.0005f)
+			{
+				panel_cvar("touch_specbar_x", "0.460");
+				panel_cvar("touch_specbar_y", "0.930");
+			}
+		}
+	}
+	view_update();
 	draw_spectate_inputs();
+	draw_viewstrip();
 	TouchDodge_DrawCue(); // over the port's CSQC HUD too
 	draw_endmenu();
 	if (TouchMode_IsMatchEnd(hud_mode()))
@@ -3937,6 +4185,23 @@ void TouchHUD_PrintRects(void)
 			spec_bar_part(part, &cx, &cy, &hx, &hy);
 			dpsnprintf(name, sizeof(name), "specbar%d", part);
 			rect_box(name, cx, cy, hx, hy);
+		}
+		if (viewstrip.drawn)
+			rect_box("viewstrip", viewstrip.cx, viewstrip.cy, viewstrip.hx, viewstrip.hy);
+		{
+			int mask;
+			if (spec_inputs_mask(&mask))
+			{
+				if (!cv("vid_keyboard_detected", 0))
+				{
+					stick_center(&cx, &cy);
+					Con_Printf("TOUCHRECT c stick %.1f %.1f %.1f\n", cx, cy, stick_radius());
+				}
+				rect_circle("FIRE", "touch_fire_x", 0.855f, "touch_fire_y", 0.680f, "touch_fire_size", 0.160f);
+				rect_circle("ALT", "touch_fire2_x", 0.770f, "touch_fire2_y", 0.755f, "touch_fire2_size", 0.100f);
+				rect_circle("DUCK", "touch_crouch_x", 0.700f, "touch_crouch_y", 0.885f, "touch_crouch_size", 0.080f);
+				rect_pill("HOP", "touch_jump_x", 0.855f, "touch_jump_y", 0.885f, "touch_jump_size", 0.072f, "touch_jump_aspect", 2.6f);
+			}
 		}
 		if (TouchSpec_StickShown(state))
 		{

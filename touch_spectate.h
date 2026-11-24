@@ -157,12 +157,18 @@ static inline const char *TouchSpec_BarLabel(int state, int part)
 	if (part == TOUCHSPEC_BAR_JOIN)
 		return action == TOUCHSPEC_ACT_JOIN ? "JOIN" : "";
 	if (action == TOUCHSPEC_ACT_NONE)
-		return part == TOUCHSPEC_BAR_MAIN && state != TOUCHSPEC_NONE ? "WATCHING" : "";
+		return part == TOUCHSPEC_BAR_MAIN && state != TOUCHSPEC_NONE ? "Watching" : "";
 	if (part == TOUCHSPEC_BAR_PREV)
 		return "<";
 	if (part == TOUCHSPEC_BAR_NEXT)
 		return ">";
-	return action == TOUCHSPEC_ACT_FOLLOW ? "FREE" : TouchSpec_ActionLabel(action);
+	return "Free";
+}
+
+// The middle of the bar: whom the view is on, or Free.
+static inline const char *TouchSpec_MainLabel(int state, const char *target)
+{
+	return !TouchSpec_Flying(state) && state != TOUCHSPEC_NONE && target && target[0] ? target : TouchSpec_BarLabel(state, TOUCHSPEC_BAR_MAIN);
 }
 
 // The move stick, the look drag and the fly rocker work only while free-
